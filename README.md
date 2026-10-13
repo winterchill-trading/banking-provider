@@ -101,7 +101,7 @@ match%bind Fake_provider.initiate_transfer fake ~from:account.id draft >>| ok_ex
 | Module | What it is |
 | --- | --- |
 | `Provider.S` | What an application needs from a provider, in Async with `Or_error` |
-| `Provider.Sandbox` | Simulations a sandbox offers: deposit, KYC decision, card authorization, transfer outcome, ping |
+| `Sandbox.S` | Simulations a sandbox offers: deposit, KYC decision, card authorization, transfer outcome, ping |
 | `Event` | The normalized event union with the provider's event id; `Stable.V1` with a pinned digest |
 | `Transfer_update` | A provider's report about a transfer, and `apply` that treats redeliveries and overtaken reports as `Stale` |
 | `Card_update` | Card status and scheme messages (request, advice, reversal, clearing, expiry) in card-core types |
@@ -111,7 +111,7 @@ match%bind Fake_provider.initiate_transfer fake ~from:account.id draft >>| ok_ex
 | `Inbox` | In-memory dedup by event id (a service keeps the durable one in its own store) |
 | `Sensitive` | Codes, tokens and secrets that print as `<redacted>`; constant-time equality |
 | `Fake_provider` | Deterministic in-memory provider over a ledger journal |
-| `Conformance` | Scenarios as a functor over `Provider.S` and `Provider.Sandbox` |
+| `Conformance` | Scenarios as a functor over `Provider.S` and `Sandbox.S` |
 | `Customer_ref`, `Account_ref`, `Event_id`, `Standing_order_ref` | Provider-side ids |
 
 ## The contract
