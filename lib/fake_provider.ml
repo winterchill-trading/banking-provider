@@ -523,47 +523,59 @@ let balance t id =
        }))
 ;;
 
+let code_of_kind : Ledger.Entry.Kind.t -> string = function
+  | Transfer tag -> String.uppercase tag
+  | Reversal _ -> "REVERSAL"
+  | Hold_place _ | Hold_place_expiring _ | Hold_increment _ -> "HOLD"
+  | Hold_release _ | Hold_expire _ -> "HOLD_RELEASE"
+  | Hold_capture _ | Hold_over_capture _ -> "CAPTURE"
+;;
+
+(* A bank statement shows posted money: the account together with its pending
+   sub-account. Placing or releasing a hold moves money between the two and nets to zero,
+   so it drops out; a capture shows as the payment. *)
 let statement t id ~from ~until =
   return
     (let open Or_error.Let_syntax in
      let%bind a = account_state t id in
      let currency = a.account.currency in
-     let%map s =
-       Ledger.Statement.create
-         ~from
-         ~until
-         (Ledger.Journal.records t.journal)
-         ~account:a.ledger
-         ~currency
+     let records = Ledger.Journal.records t.journal in
+     let side account =
+       Ledger.Statement.create ~from ~until records ~account ~currency
      in
-     let lines =
-       List.map s.lines ~f:(fun (l : Ledger.Statement.Line.t) ->
-         let code =
-           match l.kind with
-           | Transfer tag -> String.uppercase tag
-           | Reversal _ -> "REVERSAL"
-           | Hold_place _ | Hold_place_expiring _ | Hold_increment _ -> "HOLD"
-           | Hold_release _ | Hold_expire _ -> "HOLD_RELEASE"
-           | Hold_capture _ | Hold_over_capture _ -> "CAPTURE"
-         in
-         { Statement.Line.at = l.effective_at
-         ; amount =
-             (match l.side with
-              | Credit -> l.amount
-              | Debit -> Money.Amount.neg l.amount)
-         ; code
-         ; reference = l.reference
-         ; balance = l.balance
-         })
+     let%bind main = side a.ledger in
+     let%bind pending = side (Ledger.Account_id.pending a.ledger) in
+     let signed (l : Ledger.Statement.Line.t) =
+       match l.side with
+       | Credit -> l.amount
+       | Debit -> Money.Amount.neg l.amount
      in
-     { Statement.account = id
-     ; currency
-     ; from
-     ; until
-     ; opening = s.opening
-     ; lines
-     ; closing = s.closing
-     })
+     let%bind opening = Money.Amount.add main.opening pending.opening in
+     let%bind _, lines =
+       main.lines @ pending.lines
+       |> List.sort_and_group ~compare:(fun (x : Ledger.Statement.Line.t) y ->
+         Int.compare x.seq y.seq)
+       |> List.fold_result ~init:(opening, []) ~f:(fun (running, acc) group ->
+         let first = List.hd_exn group in
+         let%bind amount = Money.Amount.sum currency (List.map group ~f:signed) in
+         if Money.Amount.is_zero amount
+         then Ok (running, acc)
+         else (
+           let%map balance = Money.Amount.add running amount in
+           ( balance
+           , { Statement.Line.at = first.effective_at
+             ; amount
+             ; code = code_of_kind first.kind
+             ; reference = first.reference
+             ; balance
+             }
+             :: acc )))
+     in
+     let lines = List.rev lines in
+     let closing =
+       Option.value_map (List.last lines) ~default:opening ~f:(fun l -> l.balance)
+     in
+     Ok { Statement.account = id; currency; from; until; opening; lines; closing })
 ;;
 
 (* {2 Transfers} *)
