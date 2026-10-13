@@ -6,7 +6,7 @@ module Purpose = struct
     | Transfer of Transfer.Id.t
     | Swap of Swap.Id.t
     | Standing_order of Standing_order_ref.t
-    | Card_details of Card_ref.t
+    | Card_details of Card_core.Ids.Card_id.t
   [@@deriving sexp, compare, equal]
 end
 

@@ -31,4 +31,5 @@
   money
   ledger
   kyc-core
-  payments-core))
+  payments-core
+  card-core))

@@ -9,6 +9,7 @@
   money
   ledger
   kyc-core
-  payments-core)
+  payments-core
+  card-core)
  (preprocess
   (pps ppx_jane)))

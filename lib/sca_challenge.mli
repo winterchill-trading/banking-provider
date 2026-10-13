@@ -15,7 +15,7 @@ module Purpose : sig
     | Transfer of Transfer.Id.t
     | Swap of Swap.Id.t
     | Standing_order of Standing_order_ref.t
-    | Card_details of Card_ref.t (** revealing a card's number through the provider *)
+    | Card_details of Card_core.Ids.Card_id.t (** revealing a card's number through the provider *)
   [@@deriving sexp, compare, equal]
 end
 

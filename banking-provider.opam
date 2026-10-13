@@ -21,6 +21,7 @@ depends: [
   "ledger"
   "kyc-core"
   "payments-core"
+  "card-core"
   "odoc" {with-doc}
 ]
 build: [

@@ -16,6 +16,7 @@ jobs:
             ledger https://github.com/winterchill-trading/ledger.git
             kyc-core https://github.com/winterchill-trading/kyc-core.git
             payments-core https://github.com/winterchill-trading/payments-core.git
+            card-core https://github.com/winterchill-trading/card-core.git
       - run: opam exec -- dune build
       - run: opam exec -- dune test
   obj-magic:
