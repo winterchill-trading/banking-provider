@@ -220,12 +220,12 @@ module type Sandbox = sig
     -> Kyc_decision.t
     -> unit Or_error.t Deferred.t
 
-  (** A card authorization at [merchant]; returns the answer given. *)
+  (** A card-not-present authorization for the merchant's amount (in the card's
+      billing currency); returns the answer given. *)
   val simulate_card_auth
     :  t
     -> Ids.Card_id.t
-    -> amount:Money.Amount.t
-    -> merchant:Card_update.Merchant.t
+    -> Card_core.Merchant.t
     -> Response_code.t Or_error.t Deferred.t
 
   (** The scheme's answer to an outgoing transfer (settle, reject, return, ...). *)

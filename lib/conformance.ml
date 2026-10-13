@@ -412,14 +412,16 @@ module Make (P : Provider.S) (Sandbox : Provider.Sandbox with type t = P.t) = st
                 (Card_core.Ids.Card_id.equal card.id again.id)
                 "a resent card request issued a second card"
             in
-            let merchant =
-              { Card_update.Merchant.name = "Conformance Shop"
-              ; mcc = Card_core.Mcc.of_int_exn 5411
-              ; country = Card_core.Country.of_string "DE"
-              }
-            in
             let one = Money.Amount.of_minor_units_int Money.Currency.eur 100 in
-            let%bind approved = Sandbox.simulate_card_auth t card.id ~amount:one ~merchant in
+            let%bind merchant =
+              Deferred.return
+                (Card_core.Merchant.create
+                   ~name:"Conformance Shop"
+                   ~mcc:(Card_core.Mcc.of_int_exn 5411)
+                   ~country:(Card_core.Country.of_string "DE")
+                   ~amount:one)
+            in
+            let%bind approved = Sandbox.simulate_card_auth t card.id merchant in
             let%bind () =
               check_d
                 (Card_core.Response_code.is_approved approved)
@@ -427,7 +429,7 @@ module Make (P : Provider.S) (Sandbox : Provider.Sandbox with type t = P.t) = st
                 approved
             in
             let%bind (_ : Card_info.t) = P.set_card_status t card.id Frozen in
-            let%bind frozen = Sandbox.simulate_card_auth t card.id ~amount:one ~merchant in
+            let%bind frozen = Sandbox.simulate_card_auth t card.id merchant in
             check_d
               (Card_core.Response_code.equal frozen Not_permitted)
               !"frozen card answered %{Card_core.Response_code}"

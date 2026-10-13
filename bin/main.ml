@@ -112,14 +112,14 @@ let demo journal_path =
            ~account:account.id)
     in
     let merchant =
-      { Card_update.Merchant.name = "Demo Shop"
-      ; mcc = Card_core.Mcc.of_int_exn 5411
-      ; country = Card_core.Country.of_string "DE"
-      }
+      Card_core.Merchant.create
+        ~name:"Demo Shop"
+        ~mcc:(Card_core.Mcc.of_int_exn 5411)
+        ~country:(Card_core.Country.of_string "DE")
+        ~amount:(eur "9.99")
+      |> Or_error.ok_exn
     in
-    let%bind response =
-      ok (Fake_provider.simulate_card_auth fake card.id ~amount:(eur "9.99") ~merchant)
-    in
+    let%bind response = ok (Fake_provider.simulate_card_auth fake card.id merchant) in
     printf "card authorization: %s\n" (Card_core.Response_code.to_string response);
     let%bind () = Scheduler.yield_until_no_jobs_remain () in
     let%bind () =
