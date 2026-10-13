@@ -16,9 +16,13 @@ let%expect_test "timestamped signatures: valid, tampered, stale, missing" =
   check ~now:start (request body);
   check ~now:start (request (body ^ " "));
   check ~now:(Time_ns.add start (Time_ns.Span.of_min 6.)) (request body);
-  check ~tolerance:Time_ns.Span.zero ~now:(Time_ns.add start (Time_ns.Span.of_day 1.)) (request body);
+  check
+    ~tolerance:Time_ns.Span.zero
+    ~now:(Time_ns.add start (Time_ns.Span.of_day 1.))
+    (request body);
   check ~now:start { headers = []; body };
-  [%expect {|
+  [%expect
+    {|
     t=1791882000,v1=c99bc652bd186a4f31d095d42189a35f9b555ac6ec2a7311251d832ca2e82a88
     (Ok ())
     (Error "webhook signature: mismatch")
@@ -48,7 +52,12 @@ let%expect_test "redelivered webhooks, shuffled, reach the inbox once each" =
   with_fake (fun ~clock:_ ~journal:_ fake ->
     let%bind _customer, account = onboard fake in
     let%bind (_ : Payments_core.Transfer.Id.t) =
-      ok (Fake_provider.simulate_deposit fake ~account:account.id ~rail:Sepa_instant (eur "5.00"))
+      ok
+        (Fake_provider.simulate_deposit
+           fake
+           ~account:account.id
+           ~rail:Sepa_instant
+           (eur "5.00"))
     in
     let%bind () = ok (Fake_provider.ping fake) in
     let deliveries = Fake_provider.webhook_deliveries fake in
@@ -72,7 +81,8 @@ let%expect_test "redelivered webhooks, shuffled, reach the inbox once each" =
     let tampered = { (List.hd_exn deliveries) with body = "(tampered)" } in
     let%bind result = Fake_provider.ingest_webhook fake tampered in
     print_s [%sexp (result : Event.t list Or_error.t)];
-    [%expect {|
+    [%expect
+      {|
       ((deliveries 6) (new_ 6) (duplicates 6) (inbox 6))
       (Error "webhook signature: mismatch")
       |}];
@@ -88,9 +98,11 @@ let%expect_test "an event id reused for other content is refused" =
     [%sexp
       (Inbox.accept
          inbox
-         (event (Swap_failed { swap = Payments_core.Swap.Id.of_string "s"; reason = "x" }))
+         (event
+            (Swap_failed { swap = Payments_core.Swap.Id.of_string "s"; reason = "x" }))
        : Inbox.Outcome.t Or_error.t)];
-  [%expect {|
+  [%expect
+    {|
     (Ok New)
     (Ok Duplicate)
     (Error ("event id reused with different content" (id evt-1)))
@@ -107,7 +119,8 @@ let%expect_test "subscribers see events as they are published" =
     (match first with
      | `Exactly q ->
        Queue.iter q ~f:(fun (e : Event.t) ->
-         print_s [%sexp (Event_id.to_string e.id : string), (Event.Kind.name e.kind : string)])
+         print_s
+           [%sexp (Event_id.to_string e.id : string), (Event.Kind.name e.kind : string)])
      | `Eof | `Fewer _ -> print_endline "missing events");
     Pipe.close_read reader;
     let%bind () = ok (Fake_provider.ping fake) in

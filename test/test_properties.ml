@@ -18,8 +18,10 @@ let update_gen : Transfer_update.t Quickcheck.Generator.t =
     ; map reason ~f:(fun r -> Transfer_update.Recall_requested r)
     ; map2 bool reason ~f:(fun accepted reason ->
         Transfer_update.Recall_answer { accepted; reason })
-    ; map (of_list Iso20022.Transaction_status.[ ACSP; ACSC; ACCC; PDNG; ACTC ]) ~f:(fun status ->
-        Transfer_update.Status_report { status; reason = None; value_date = None })
+    ; map
+        (of_list Iso20022.Transaction_status.[ ACSP; ACSC; ACCC; PDNG; ACTC ])
+        ~f:(fun status ->
+          Transfer_update.Status_report { status; reason = None; value_date = None })
     ]
 ;;
 
@@ -43,9 +45,7 @@ let%expect_test "applying an update twice: the second time is stale" =
   Quickcheck.test
     ~sexp_of:[%sexp_of: Rail.t * Transfer_update.t list]
     Quickcheck.Generator.(
-      tuple2
-        (of_list [ Rail.Sepa_credit; Sepa_instant ])
-        (list_with_length 6 update_gen))
+      tuple2 (of_list [ Rail.Sepa_credit; Sepa_instant ]) (list_with_length 6 update_gen))
     ~f:(fun (rail, updates) ->
       ignore
         (List.fold updates ~init:(submitted rail) ~f:(fun transfer update ->
@@ -102,7 +102,10 @@ let%expect_test "random activity keeps the books balanced and statements consist
           let clock = Time_source.create ~now:start () in
           let ts = Time_source.read_only clock in
           let journal =
-            Ledger.Journal.create ~time_source:ts ~fsync:false (dir ^/ Int.to_string !trial)
+            Ledger.Journal.create
+              ~time_source:ts
+              ~fsync:false
+              (dir ^/ Int.to_string !trial)
             |> ok_exn
           in
           (* Manual settlement leaves payments and card authorizations held, so the
@@ -150,7 +153,9 @@ let%expect_test "random activity keeps the books balanced and statements consist
               let draft =
                 sepa_draft ~rail:Sepa_instant ~id:(sprintf "p%d" i) account (cents c)
               in
-              (match now (Fake_provider.initiate_transfer fake ~from:account.id draft) with
+              (match
+                 now (Fake_provider.initiate_transfer fake ~from:account.id draft)
+               with
                | Ok (Challenge ch) ->
                  ignore
                    (now (Fake_provider.confirm_sca fake ch.id ~code) |> ok_exn
@@ -167,7 +172,10 @@ let%expect_test "random activity keeps the books balanced and statements consist
                  : Card_core.Response_code.t)
             | Refund c ->
               now
-                (Fake_provider.refund_card fake card.id (merchant ~amount:(cents c) "Shop"))
+                (Fake_provider.refund_card
+                   fake
+                   card.id
+                   (merchant ~amount:(cents c) "Shop"))
               |> ok_exn);
           Ledger.Trial_balance.of_balances (Ledger.Journal.balances journal)
           |> Ledger.Trial_balance.check
@@ -188,9 +196,7 @@ let%expect_test "random activity keeps the books balanced and statements consist
           if Money.Amount.is_negative balance.available
           then raise_s [%message "overdrawn" (balance : Account.Balance.t)];
           if not (List.is_empty (Fake_provider.background_errors fake))
-          then
-            raise_s
-              [%message (Fake_provider.background_errors fake : Error.t list)];
+          then raise_s [%message (Fake_provider.background_errors fake : Error.t list)];
           Ledger.Journal.close journal);
       return ())
   in

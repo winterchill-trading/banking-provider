@@ -15,7 +15,8 @@ let%expect_test "the fake passes the conformance suite" =
   with_fake (fun ~clock:_ ~journal:_ fake ->
     let%map results = Suite.run_all (Conformance.Config.default ~run_id:"conf") fake in
     print_results results;
-    [%expect {|
+    [%expect
+      {|
       ok   create_customer is idempotent on our customer id
       ok   a KYC approval is published as an event and reported by kyc_status
       ok   an approved customer gets an EUR account with an IBAN
@@ -44,12 +45,17 @@ let%expect_test "with a fee and delayed settlement" =
   with_dir (fun dir ->
     (* Delayed work runs on the wall clock here, as against a real sandbox. *)
     let clock = Time_source.wall_clock () in
-    let journal = Ledger.Journal.create ~time_source:clock ~fsync:false (dir ^/ "j") |> ok_exn in
+    let journal =
+      Ledger.Journal.create ~time_source:clock ~fsync:false (dir ^/ "j") |> ok_exn
+    in
     let fake = Fake_provider.create ~config ~time_source:clock ~journal () |> ok_exn in
-    let%map results = Suite.run_all (Conformance.Config.default ~run_id:"conf-fee") fake in
+    let%map results =
+      Suite.run_all (Conformance.Config.default ~run_id:"conf-fee") fake
+    in
     print_results results;
     Ledger.Journal.close journal;
-    [%expect {|
+    [%expect
+      {|
       ok   create_customer is idempotent on our customer id
       ok   a KYC approval is published as an event and reported by kyc_status
       ok   an approved customer gets an EUR account with an IBAN

@@ -3,8 +3,8 @@ open Async
 open Banking_provider
 open Helpers
 
-(* Changing any type an event carries changes this digest. Persisted events (an inbox,
-   a journal of provider events) would then no longer read back: add a [V2] instead. *)
+(* Changing any type an event carries changes this digest. Persisted events (an inbox, a
+   journal of provider events) would then no longer read back: add a [V2] instead. *)
 let%expect_test "Event.Stable.V1 shape is pinned" =
   print_endline [%bin_digest: Event.Stable.V1.t];
   [%expect {| c2a5e9ee1ce7a62ad276c0c62abcf3f3 |}];
@@ -15,18 +15,25 @@ let%expect_test "events round-trip through sexp and bin_prot" =
   with_fake (fun ~clock:_ ~journal:_ fake ->
     let%bind _customer, account = onboard fake in
     let%bind (_ : Payments_core.Transfer.Id.t) =
-      ok (Fake_provider.simulate_deposit fake ~account:account.id ~rail:Sepa_credit (eur "1.00"))
+      ok
+        (Fake_provider.simulate_deposit
+           fake
+           ~account:account.id
+           ~rail:Sepa_credit
+           (eur "1.00"))
     in
     let events = Fake_provider.published fake in
     let sexp_ok =
-      List.for_all events ~f:(fun e -> Event.equal e (Event.t_of_sexp (Event.sexp_of_t e)))
+      List.for_all events ~f:(fun e ->
+        Event.equal e (Event.t_of_sexp (Event.sexp_of_t e)))
     in
     let bin_ok =
       List.for_all events ~f:(fun e ->
         let s = Binable.to_string (module Event.Stable.V1) e in
         Event.equal e (Binable.of_string (module Event.Stable.V1) s))
     in
-    print_s [%message "" ~events:(List.length events : int) (sexp_ok : bool) (bin_ok : bool)];
+    print_s
+      [%message "" ~events:(List.length events : int) (sexp_ok : bool) (bin_ok : bool)];
     [%expect {| ((events 5) (sexp_ok true) (bin_ok true)) |}];
     return ())
 ;;
@@ -43,7 +50,9 @@ let%expect_test "KYC events become kyc-core events keyed by the provider event i
     let%bind (_ : Customer.Verification_session.t) =
       ok (Fake_provider.start_verification fake customer.id Email)
     in
-    let%bind state = ok (Fake_provider.complete_verification fake customer.id Email ~code) in
+    let%bind state =
+      ok (Fake_provider.complete_verification fake customer.id Email ~code)
+    in
     print_s [%sexp (state : Kyc_core.Verification.State.t)];
     (* The application opens the case itself, with the person it collected; provider
        events carry no personal data. *)
@@ -68,7 +77,8 @@ let%expect_test "KYC events become kyc-core events keyed by the provider event i
         (Kyc_core.Kyc_case.step case Email : Kyc_core.Verification.State.t)
         , (Kyc_core.Kyc_case.has_applied case (Kyc_core.Event_id.of_string "evt_000002")
            : bool)];
-    [%expect {|
+    [%expect
+      {|
       (Verified "2026-10-13 09:00:00Z")
       ((Verified "2026-10-13 09:00:00Z") true)
       |}];
@@ -79,7 +89,12 @@ let%expect_test "statement lines follow the balance" =
   with_fake (fun ~clock ~journal:_ fake ->
     let%bind _customer, account = onboard fake in
     let%bind (_ : Payments_core.Transfer.Id.t) =
-      ok (Fake_provider.simulate_deposit fake ~account:account.id ~rail:Sepa_instant (eur "80.00"))
+      ok
+        (Fake_provider.simulate_deposit
+           fake
+           ~account:account.id
+           ~rail:Sepa_instant
+           (eur "80.00"))
     in
     Time_source.advance_directly clock ~to_:(Time_ns.add start (Time_ns.Span.of_hr 1.));
     let draft = sepa_draft ~rail:Sepa_instant ~id:"st-1" account (eur "30.00") in
@@ -97,7 +112,8 @@ let%expect_test "statement lines follow the balance" =
     in
     print_s [%sexp (statement : Statement.t)];
     print_s [%sexp (Statement.check statement : unit Or_error.t)];
-    [%expect {|
+    [%expect
+      {|
       ((account acc_000001) (currency EUR) (from "2026-10-13 09:00:00Z")
        (until "2026-10-14 09:00:00Z") (opening "0.00 EUR")
        (lines
@@ -114,9 +130,16 @@ let%expect_test "statement lines follow the balance" =
 let%expect_test "Lightning: a payment to an address settles with a preimage" =
   with_fake (fun ~clock:_ ~journal:_ fake ->
     let%bind _customer, account = onboard ~currency:Money.Currency.btc_lightning fake in
-    let sats s = Money.Amount.of_decimal_string Money.Currency.btc_lightning s |> ok_exn in
+    let sats s =
+      Money.Amount.of_decimal_string Money.Currency.btc_lightning s |> ok_exn
+    in
     let%bind (_ : Payments_core.Transfer.Id.t) =
-      ok (Fake_provider.simulate_deposit fake ~account:account.id ~rail:Lightning (sats "0.001"))
+      ok
+        (Fake_provider.simulate_deposit
+           fake
+           ~account:account.id
+           ~rail:Lightning
+           (sats "0.001"))
     in
     let beneficiary =
       Payments_core.Beneficiary.create
@@ -149,7 +172,8 @@ let%expect_test "Lightning: a payment to an address settles with a preimage" =
         (info.status : Payments_core.Transfer.Status.t)
         , (info.details : Payments_core.Transfer.Details.t)];
     let%bind () = print_balance fake account.id in
-    [%expect {|
+    [%expect
+      {|
       (Settled
        (Lightning
         (payment_hash

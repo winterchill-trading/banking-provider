@@ -34,7 +34,8 @@ let with_dir f =
     (fun () -> f dir)
     ~finally:(fun () ->
       let%map (_ : Core_unix.Exit_or_signal.t) =
-        In_thread.run (fun () -> Core_unix.system (sprintf "rm -rf %s" (Filename.quote dir)))
+        In_thread.run (fun () ->
+          Core_unix.system (sprintf "rm -rf %s" (Filename.quote dir)))
       in
       ())
 ;;

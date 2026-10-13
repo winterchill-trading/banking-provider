@@ -8,7 +8,8 @@ let%expect_test "onboarding: KYC events, an account and an IBAN" =
     let events = event_printer fake in
     let%bind customer, account = onboard fake in
     events ();
-    [%expect {|
+    [%expect
+      {|
       (evt_000001 (Kyc (customer cus_000001) (update (Status Submit))))
       (evt_000002 (Kyc (customer cus_000001) (update (Status Approve))))
       (evt_000003
@@ -24,7 +25,8 @@ let%expect_test "onboarding: KYC events, an account and an IBAN" =
     let%bind status = ok (Fake_provider.kyc_status fake customer.id) in
     print_s [%sexp (status.status : Kyc_core.Status.t), (status.tier : Kyc_core.Tier.t)];
     print_s [%sexp (account.addresses : Account.Address.t list)];
-    [%expect {|
+    [%expect
+      {|
       (Approved T0)
       ((Iban (iban DE97500105170000000001) (bic ())))
       |}];
@@ -36,11 +38,17 @@ let%expect_test "SEPA deposit, then a payment confirmed by SCA" =
     let%bind _customer, account = onboard fake in
     let events = event_printer fake in
     let%bind (_ : Payments_core.Transfer.Id.t) =
-      ok (Fake_provider.simulate_deposit fake ~account:account.id ~rail:Sepa_credit (eur "100.00"))
+      ok
+        (Fake_provider.simulate_deposit
+           fake
+           ~account:account.id
+           ~rail:Sepa_credit
+           (eur "100.00"))
     in
     events ();
     let%bind () = print_balance fake account.id in
-    [%expect {|
+    [%expect
+      {|
       (evt_000005
        (Incoming_transfer (account acc_000001) (transfer in:dep_000001)
         (provider_ref dep_000001) (rail Sepa_credit) (amount "100.00 EUR")
@@ -68,13 +76,15 @@ let%expect_test "SEPA deposit, then a payment confirmed by SCA" =
     let%bind started = ok (Fake_provider.initiate_transfer fake ~from:account.id draft) in
     let challenge = challenge_of started in
     print_s [%sexp (challenge : Sca_challenge.t)];
-    [%expect {|
+    [%expect
+      {|
       ((id sca_000001) (purpose (Transfer t-1)) (factors (Otp))
        (expires_at "2026-10-13 09:05:00Z") (attempts_left 3))
       |}];
     (* A wrong code first: one attempt fewer, nothing moves. *)
     let%bind wrong =
-      ok (Fake_provider.confirm_sca fake challenge.id ~code:(Sensitive.of_string "000000"))
+      ok
+        (Fake_provider.confirm_sca fake challenge.id ~code:(Sensitive.of_string "000000"))
     in
     let%bind right = ok (Fake_provider.confirm_sca fake challenge.id ~code) in
     print_s [%sexp (wrong : Sca_challenge.Result.t), (right : Sca_challenge.Result.t)];
@@ -83,7 +93,8 @@ let%expect_test "SEPA deposit, then a payment confirmed by SCA" =
     let%bind info = ok (Fake_provider.transfer fake draft.id) in
     print_s [%sexp (info.status : Payments_core.Transfer.Status.t)];
     print_s [%sexp (Fake_provider.background_errors fake : Error.t list)];
-    [%expect {|
+    [%expect
+      {|
       ((Wrong_code (attempts_left 2)) Accepted)
       (evt_000006
        (Transfer (transfer t-1) (provider_ref tr_000001) (update Submitted)))
@@ -102,7 +113,12 @@ let%expect_test "a resent initiation returns the same transfer" =
   with_fake (fun ~clock:_ ~journal:_ fake ->
     let%bind _customer, account = onboard fake in
     let%bind (_ : Payments_core.Transfer.Id.t) =
-      ok (Fake_provider.simulate_deposit fake ~account:account.id ~rail:Sepa_instant (eur "50.00"))
+      ok
+        (Fake_provider.simulate_deposit
+           fake
+           ~account:account.id
+           ~rail:Sepa_instant
+           (eur "50.00"))
     in
     let draft = sepa_draft ~rail:Sepa_instant ~id:"t-2" account (eur "10.00") in
     let%bind first = ok (Fake_provider.initiate_transfer fake ~from:account.id draft) in
@@ -116,7 +132,8 @@ let%expect_test "a resent initiation returns the same transfer" =
      | Done info -> print_s [%sexp (info.status : Payments_core.Transfer.Status.t)]
      | Challenge _ -> print_endline "challenge again");
     let%bind () = print_balance fake account.id in
-    [%expect {|
+    [%expect
+      {|
       true
       Settled
       ((available "40.00 EUR") (held "0.00 EUR") (posted "40.00 EUR"))
@@ -135,7 +152,8 @@ let%expect_test "a payment above the available balance fails and holds nothing" 
     in
     events ();
     let%bind () = print_balance fake account.id in
-    [%expect {|
+    [%expect
+      {|
       (evt_000005
        (Transfer (transfer t-3) (provider_ref tr_000001)
         (update (Failed Insufficient_funds))))

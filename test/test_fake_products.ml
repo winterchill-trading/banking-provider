@@ -6,13 +6,25 @@ open Helpers
 let%expect_test "swap EUR to BTC after SCA books three legs" =
   with_fake (fun ~clock:_ ~journal fake ->
     let%bind customer, eur_account = onboard fake in
-    let%bind btc_account = ok (Fake_provider.open_account fake customer.id Money.Currency.btc) in
+    let%bind btc_account =
+      ok (Fake_provider.open_account fake customer.id Money.Currency.btc)
+    in
     let%bind (_ : Payments_core.Transfer.Id.t) =
-      ok (Fake_provider.simulate_deposit fake ~account:eur_account.id ~rail:Sepa_instant (eur "600.00"))
+      ok
+        (Fake_provider.simulate_deposit
+           fake
+           ~account:eur_account.id
+           ~rail:Sepa_instant
+           (eur "600.00"))
     in
     let events = event_printer fake in
     let%bind quote =
-      ok (Fake_provider.quote_swap fake ~from:eur_account.id ~to_:btc_account.id ~sell:(eur "300.00"))
+      ok
+        (Fake_provider.quote_swap
+           fake
+           ~from:eur_account.id
+           ~to_:btc_account.id
+           ~sell:(eur "300.00"))
     in
     print_s
       [%message
@@ -20,7 +32,9 @@ let%expect_test "swap EUR to BTC after SCA books three legs" =
           ~sell:(Money.Amount.to_string quote.sell)
           ~buy:(Money.Amount.to_string quote.buy)];
     let%bind started = ok (Fake_provider.execute_swap fake quote.id) in
-    let%bind result = ok (Fake_provider.confirm_sca fake (challenge_of started).id ~code) in
+    let%bind result =
+      ok (Fake_provider.confirm_sca fake (challenge_of started).id ~code)
+    in
     print_s [%sexp (result : Sca_challenge.Result.t)];
     events ();
     let%bind () = print_balance fake eur_account.id in
@@ -28,7 +42,8 @@ let%expect_test "swap EUR to BTC after SCA books three legs" =
     Ledger.Trial_balance.of_balances (Ledger.Journal.balances journal)
     |> Ledger.Trial_balance.check
     |> ok_exn;
-    [%expect {|
+    [%expect
+      {|
       ((sell "300.00 EUR") (buy "0.00500000 BTC"))
       Accepted
       (evt_000007
@@ -45,30 +60,58 @@ let%expect_test "card: approve, decline, clear, refund" =
   with_fake (fun ~clock:_ ~journal:_ fake ->
     let%bind customer, account = onboard fake in
     let%bind (_ : Payments_core.Transfer.Id.t) =
-      ok (Fake_provider.simulate_deposit fake ~account:account.id ~rail:Sepa_instant (eur "50.00"))
+      ok
+        (Fake_provider.simulate_deposit
+           fake
+           ~account:account.id
+           ~rail:Sepa_instant
+           (eur "50.00"))
     in
     let%bind card =
-      ok (Fake_provider.issue_virtual_card fake ~request_id:"card-req-1" customer.id ~account:account.id)
+      ok
+        (Fake_provider.issue_virtual_card
+           fake
+           ~request_id:"card-req-1"
+           customer.id
+           ~account:account.id)
     in
     let%bind again =
-      ok (Fake_provider.issue_virtual_card fake ~request_id:"card-req-1" customer.id ~account:account.id)
+      ok
+        (Fake_provider.issue_virtual_card
+           fake
+           ~request_id:"card-req-1"
+           customer.id
+           ~account:account.id)
     in
     print_s
       [%message
         ""
           ~same:(Card_info.equal card again : bool)
-          ~pan:(Option.map card.masked_pan ~f:Card_core.Masked_pan.to_string : string option)
+          ~pan:
+            (Option.map card.masked_pan ~f:Card_core.Masked_pan.to_string : string option)
           ~status:(card.status : Card_core.Card.Status.t)];
     let events = event_printer fake in
     let%bind approved =
-      ok (Fake_provider.simulate_card_auth fake card.id (merchant ~amount:(eur "12.50") "Grocer"))
+      ok
+        (Fake_provider.simulate_card_auth
+           fake
+           card.id
+           (merchant ~amount:(eur "12.50") "Grocer"))
     in
     let%bind too_much =
-      ok (Fake_provider.simulate_card_auth fake card.id (merchant ~amount:(eur "60.00") "Grocer"))
+      ok
+        (Fake_provider.simulate_card_auth
+           fake
+           card.id
+           (merchant ~amount:(eur "60.00") "Grocer"))
     in
     let%bind (_ : Card_info.t) = ok (Fake_provider.set_card_status fake card.id Frozen) in
     let%bind frozen =
-      ok (Fake_provider.simulate_card_auth fake card.id (merchant ~amount:(eur "1.00") "Grocer"))
+      ok
+        (Fake_provider.simulate_card_auth
+           fake
+           card.id
+           (merchant ~amount:(eur "1.00") "Grocer"))
     in
     print_s
       [%sexp
@@ -80,7 +123,8 @@ let%expect_test "card: approve, decline, clear, refund" =
     in
     events ();
     let%bind () = print_balance fake account.id in
-    [%expect {|
+    [%expect
+      {|
       ((same true) (pan ("**** 0001 10/29")) (status Active))
       (00 51 57)
       (evt_000007
@@ -136,16 +180,30 @@ let%expect_test "card clearing: partial, above the authorization, reversal" =
   with_fake ~config (fun ~clock:_ ~journal:_ fake ->
     let%bind customer, account = onboard fake in
     let%bind (_ : Payments_core.Transfer.Id.t) =
-      ok (Fake_provider.simulate_deposit fake ~account:account.id ~rail:Sepa_instant (eur "100.00"))
+      ok
+        (Fake_provider.simulate_deposit
+           fake
+           ~account:account.id
+           ~rail:Sepa_instant
+           (eur "100.00"))
     in
     let%bind card =
-      ok (Fake_provider.issue_virtual_card fake ~request_id:"r" customer.id ~account:account.id)
+      ok
+        (Fake_provider.issue_virtual_card
+           fake
+           ~request_id:"r"
+           customer.id
+           ~account:account.id)
     in
     let auth_ids = ref [] in
     let%bind () =
       Deferred.List.iter ~how:`Sequential [ "20.00"; "30.00"; "10.00" ] ~f:(fun amount ->
         let%map (_ : Card_core.Response_code.t) =
-          ok (Fake_provider.simulate_card_auth fake card.id (merchant ~mcc:5812 ~amount:(eur amount) "Diner"))
+          ok
+            (Fake_provider.simulate_card_auth
+               fake
+               card.id
+               (merchant ~mcc:5812 ~amount:(eur amount) "Diner"))
         in
         ())
     in
@@ -163,7 +221,8 @@ let%expect_test "card clearing: partial, above the authorization, reversal" =
     let%bind () = ok (Fake_provider.clear_card_auth fake a2 ~amount:(eur "33.00") ()) in
     let%bind () = ok (Fake_provider.reverse_card_auth fake a3 ()) in
     let%bind () = print_balance fake account.id in
-    [%expect {|
+    [%expect
+      {|
       ((available "40.00 EUR") (held "60.00 EUR") (posted "100.00 EUR"))
       ((available "52.00 EUR") (held "0.00 EUR") (posted "52.00 EUR"))
       |}];
@@ -174,7 +233,12 @@ let%expect_test "card details need SCA, then a token that never prints" =
   with_fake (fun ~clock:_ ~journal:_ fake ->
     let%bind customer, account = onboard fake in
     let%bind card =
-      ok (Fake_provider.issue_virtual_card fake ~request_id:"r" customer.id ~account:account.id)
+      ok
+        (Fake_provider.issue_virtual_card
+           fake
+           ~request_id:"r"
+           customer.id
+           ~account:account.id)
     in
     let%bind first = ok (Fake_provider.card_details_token fake card.id) in
     let%bind (_ : Sca_challenge.Result.t) =
@@ -190,7 +254,12 @@ let%expect_test "standing order: confirmed once, runs on its dates" =
   with_fake (fun ~clock ~journal:_ fake ->
     let%bind _customer, account = onboard fake in
     let%bind (_ : Payments_core.Transfer.Id.t) =
-      ok (Fake_provider.simulate_deposit fake ~account:account.id ~rail:Sepa_instant (eur "100.00"))
+      ok
+        (Fake_provider.simulate_deposit
+           fake
+           ~account:account.id
+           ~rail:Sepa_instant
+           (eur "100.00"))
     in
     let draft = sepa_draft ~id:"template" account (eur "20.00") in
     let beneficiary =
@@ -211,7 +280,9 @@ let%expect_test "standing order: confirmed once, runs on its dates" =
         ()
       |> ok_exn
     in
-    let%bind started = ok (Fake_provider.create_standing_order fake ~from:account.id order) in
+    let%bind started =
+      ok (Fake_provider.create_standing_order fake ~from:account.id order)
+    in
     let%bind (_ : Sca_challenge.Result.t) =
       ok (Fake_provider.confirm_sca fake (challenge_of started).id ~code)
     in
@@ -228,22 +299,34 @@ let%expect_test "standing order: confirmed once, runs on its dates" =
         , (repeat : Payments_core.Transfer.Id.t list)
         , (second : Payments_core.Transfer.Id.t list)];
     let%bind () = print_balance fake account.id in
-    [%expect {|
+    [%expect
+      {|
       (() (so-rent:2026-10-14) () (so-rent:2026-11-14))
       ((available "60.00 EUR") (held "0.00 EUR") (posted "60.00 EUR"))
       |}];
     return ())
 ;;
 
-let%expect_test "card: a stand-in advice is recorded, an unused hold expires after 7 days" =
+let%expect_test "card: a stand-in advice is recorded, an unused hold expires after 7 days"
+  =
   let config = { Fake_provider.Config.default with settlement = Manual } in
   with_fake ~config (fun ~clock ~journal:_ fake ->
     let%bind customer, account = onboard fake in
     let%bind (_ : Payments_core.Transfer.Id.t) =
-      ok (Fake_provider.simulate_deposit fake ~account:account.id ~rail:Sepa_instant (eur "20.00"))
+      ok
+        (Fake_provider.simulate_deposit
+           fake
+           ~account:account.id
+           ~rail:Sepa_instant
+           (eur "20.00"))
     in
     let%bind card =
-      ok (Fake_provider.issue_virtual_card fake ~request_id:"r" customer.id ~account:account.id)
+      ok
+        (Fake_provider.issue_virtual_card
+           fake
+           ~request_id:"r"
+           customer.id
+           ~account:account.id)
     in
     let events = event_printer fake in
     let%bind (_ : Card_core.Ids.Auth_id.t) =
@@ -258,10 +341,13 @@ let%expect_test "card: a stand-in advice is recorded, an unused hold expires aft
     let%bind early = ok (Fake_provider.expire_card_auths fake) in
     Time_source.advance_directly clock ~to_:(Time_ns.add start (Time_ns.Span.of_day 8.));
     let%bind expired = ok (Fake_provider.expire_card_auths fake) in
-    print_s [%sexp (early : Card_core.Ids.Auth_id.t list), (expired : Card_core.Ids.Auth_id.t list)];
+    print_s
+      [%sexp
+        (early : Card_core.Ids.Auth_id.t list), (expired : Card_core.Ids.Auth_id.t list)];
     events ();
     let%bind () = print_balance fake account.id in
-    [%expect {|
+    [%expect
+      {|
       ((available "12.00 EUR") (held "8.00 EUR") (posted "20.00 EUR"))
       (() (auth_000001))
       (evt_000007

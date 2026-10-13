@@ -26,13 +26,16 @@ let outcome fake id update =
 
 let%expect_test "SCT Inst: timeout releases the hold, a late settlement debits again" =
   with_fake ~config:manual (fun ~clock:_ ~journal:_ fake ->
-    let%bind account, id = funded_payment ~rail:Sepa_instant fake ~id:"inst-1" (eur "25.00") in
+    let%bind account, id =
+      funded_payment ~rail:Sepa_instant fake ~id:"inst-1" (eur "25.00")
+    in
     let%bind () = print_balance fake account.id in
     let%bind () = outcome fake id Timed_out in
     let%bind () = print_balance fake account.id in
     let%bind () = outcome fake id Settled in
     let%bind () = print_balance fake account.id in
-    [%expect {|
+    [%expect
+      {|
       ((available "75.00 EUR") (held "25.00 EUR") (posted "100.00 EUR"))
       Timed_out
       ((available "100.00 EUR") (held "0.00 EUR") (posted "100.00 EUR"))
@@ -48,7 +51,8 @@ let%expect_test "SEPA: a return after settlement credits the amount back" =
     let%bind () = outcome fake id Settled in
     let%bind () = outcome fake id (Returned AC04) in
     let%bind () = print_balance fake account.id in
-    [%expect {|
+    [%expect
+      {|
       Settled
       (Returned AC04)
       ((available "100.00 EUR") (held "0.00 EUR") (posted "100.00 EUR"))
@@ -64,7 +68,8 @@ let%expect_test "redelivered and overtaken reports change nothing" =
     let%bind () = outcome fake id Pending in
     let%bind () = outcome fake id Settled in
     let%bind () = print_balance fake account.id in
-    [%expect {|
+    [%expect
+      {|
       Settled
       Settled
       Settled
@@ -78,7 +83,8 @@ let%expect_test "a rejection with an ISO reason releases the hold" =
     let%bind account, id = funded_payment fake ~id:"sct-3" (eur "10.00") in
     let%bind () = outcome fake id (Rejected AC01) in
     let%bind () = print_balance fake account.id in
-    [%expect {|
+    [%expect
+      {|
       (Rejected AC01)
       ((available "100.00 EUR") (held "0.00 EUR") (posted "100.00 EUR"))
       |}];
@@ -99,7 +105,8 @@ let%expect_test "three wrong codes fail the transfer" =
     print_s [%sexp (results : Sca_challenge.Result.t list)];
     let%bind info = ok (Fake_provider.transfer fake draft.id) in
     print_s [%sexp (info.status : Payments_core.Transfer.Status.t)];
-    [%expect {|
+    [%expect
+      {|
       ((Wrong_code (attempts_left 2)) (Wrong_code (attempts_left 1))
        (Failed Too_many_attempts) (Failed Too_many_attempts))
       (Failed Sca_failed)
@@ -127,12 +134,17 @@ let%expect_test "on-chain deposit: pending until confirmations arrive later" =
            (btc "0.01"))
     in
     let%bind () = print_balance fake account.id in
-    let%bind () = Time_source.advance_by_alarms clock ~to_:(Time_ns.add start (Time_ns.Span.of_min 11.)) in
+    let%bind () =
+      Time_source.advance_by_alarms
+        clock
+        ~to_:(Time_ns.add start (Time_ns.Span.of_min 11.))
+    in
     events ();
     let%bind () = print_balance fake account.id in
     let%bind info = ok (Fake_provider.transfer fake id) in
     print_s [%sexp (info.status : Payments_core.Transfer.Status.t)];
-    [%expect {|
+    [%expect
+      {|
       ((Crypto
         (address
          ((network Bitcoin) (address bc1qngrfsa58rwnlg55md52ck3vhwth6k6lyv0a282)))
