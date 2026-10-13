@@ -1,0 +1,17 @@
+(executable
+ (name main)
+ (public_name banking-provider)
+ (libraries
+  banking-provider
+  core
+  core_unix
+  core_unix.command_unix
+  core_unix.filename_unix
+  async
+  money
+  ledger
+  kyc-core
+  payments-core
+  card-core)
+ (preprocess
+  (pps ppx_jane)))
