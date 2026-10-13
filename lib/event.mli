@@ -100,7 +100,9 @@ val incoming_transfer_id : provider_ref:string -> Transfer.Id.t
 val booking_event_id : t -> string
 
 (** The kyc-core event for a [Kyc] event, applied to our case for [customer_id]; the
-    actor is [Provider provider]. [None] for other kinds. *)
+    actor is [Provider provider]. [None] for other kinds. Provider events carry no
+    personal data, so the application opens the case itself ([Opened person]) before
+    applying these. *)
 val to_kyc_event
   :  t
   -> customer_id:Kyc_core.Customer_id.t
