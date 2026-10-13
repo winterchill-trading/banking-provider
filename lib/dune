@@ -1,0 +1,14 @@
+(library
+ (name banking_provider)
+ (public_name banking-provider)
+ (libraries
+  core
+  async_kernel
+  cryptokit
+  zarith
+  money
+  ledger
+  kyc-core
+  payments-core)
+ (preprocess
+  (pps ppx_jane)))
