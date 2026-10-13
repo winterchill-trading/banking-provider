@@ -234,3 +234,46 @@ let%expect_test "standing order: confirmed once, runs on its dates" =
       |}];
     return ())
 ;;
+
+let%expect_test "card: a stand-in advice is recorded, an unused hold expires after 7 days" =
+  let config = { Fake_provider.Config.default with settlement = Manual } in
+  with_fake ~config (fun ~clock ~journal:_ fake ->
+    let%bind customer, account = onboard fake in
+    let%bind (_ : Payments_core.Transfer.Id.t) =
+      ok (Fake_provider.simulate_deposit fake ~account:account.id ~rail:Sepa_instant (eur "20.00"))
+    in
+    let%bind card =
+      ok (Fake_provider.issue_virtual_card fake ~request_id:"r" customer.id ~account:account.id)
+    in
+    let events = event_printer fake in
+    let%bind (_ : Card_core.Ids.Auth_id.t) =
+      ok
+        (Fake_provider.simulate_card_advice
+           fake
+           card.id
+           (merchant ~amount:(eur "8.00") "Transit")
+           ~response:Approved)
+    in
+    let%bind () = print_balance fake account.id in
+    let%bind early = ok (Fake_provider.expire_card_auths fake) in
+    Time_source.advance_directly clock ~to_:(Time_ns.add start (Time_ns.Span.of_day 8.));
+    let%bind expired = ok (Fake_provider.expire_card_auths fake) in
+    print_s [%sexp (early : Card_core.Ids.Auth_id.t list), (expired : Card_core.Ids.Auth_id.t list)];
+    events ();
+    let%bind () = print_balance fake account.id in
+    [%expect {|
+      ((available "12.00 EUR") (held "8.00 EUR") (posted "20.00 EUR"))
+      (() (auth_000001))
+      (evt_000007
+       (Card (card card_000001)
+        (update
+         (Auth_advice
+          ((auth auth_000001) (network_txn ntx_000001) (amount "8.00 EUR")
+           (approved "8.00 EUR")
+           (merchant ((name Transit) (mcc 5411) (country DE) (amount "8.00 EUR")))
+           (entry_mode Chip) (response 00) (decided_by Stand_in))))))
+      (evt_000008 (Card (card card_000001) (update (Expiry (auth auth_000001)))))
+      ((available "20.00 EUR") (held "0.00 EUR") (posted "20.00 EUR"))
+      |}];
+    return ())
+;;
