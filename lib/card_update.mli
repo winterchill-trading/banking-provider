@@ -7,7 +7,12 @@
     pass {!Card_core.Pan_guard} before they get here. *)
 
 open! Core
-open Card_core
+module Card := Card_core.Card
+module Ids := Card_core.Ids
+module Mcc := Card_core.Mcc
+module Country := Card_core.Country
+module Entry_mode := Card_core.Entry_mode
+module Response_code := Card_core.Response_code
 
 module Status : sig
   (** {!Card_core.Card.Status.t} with a binary form, for persisted events. *)

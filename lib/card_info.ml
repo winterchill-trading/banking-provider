@@ -1,5 +1,8 @@
 open! Core
-open Card_core
+module Card = Card_core.Card
+module Ids = Card_core.Ids
+module Limits = Card_core.Limits
+module Masked_pan = Card_core.Masked_pan
 
 type t =
   { id : Ids.Card_id.t

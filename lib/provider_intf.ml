@@ -3,7 +3,11 @@
 open! Core
 open Async_kernel
 open Payments_core
-open Card_core
+module Card = Card_core.Card
+module Ids = Card_core.Ids
+module Limits = Card_core.Limits
+module Pan_display_token = Card_core.Pan_display_token
+module Response_code = Card_core.Response_code
 
 (** Every call is asynchronous and returns [Or_error]: a provider is a remote service, and
     a refusal is an answer, not an exception.
