@@ -162,13 +162,12 @@ let%expect_test "random activity keeps the books balanced and statements consist
                    (Fake_provider.simulate_card_auth
                       fake
                       card.id
-                      ~amount:(cents c)
-                      ~merchant:(merchant "Shop"))
+                      (merchant ~amount:(cents c) "Shop"))
                  |> ok_exn
                  : Card_core.Response_code.t)
             | Refund c ->
               now
-                (Fake_provider.refund_card fake card.id ~amount:(cents c) ~merchant:(merchant "Shop"))
+                (Fake_provider.refund_card fake card.id (merchant ~amount:(cents c) "Shop"))
               |> ok_exn);
           Ledger.Trial_balance.of_balances (Ledger.Journal.balances journal)
           |> Ledger.Trial_balance.check

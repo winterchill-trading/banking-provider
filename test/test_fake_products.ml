@@ -61,14 +61,14 @@ let%expect_test "card: approve, decline, clear, refund" =
           ~status:(card.status : Card_core.Card.Status.t)];
     let events = event_printer fake in
     let%bind approved =
-      ok (Fake_provider.simulate_card_auth fake card.id ~amount:(eur "12.50") ~merchant:(merchant "Grocer"))
+      ok (Fake_provider.simulate_card_auth fake card.id (merchant ~amount:(eur "12.50") "Grocer"))
     in
     let%bind too_much =
-      ok (Fake_provider.simulate_card_auth fake card.id ~amount:(eur "60.00") ~merchant:(merchant "Grocer"))
+      ok (Fake_provider.simulate_card_auth fake card.id (merchant ~amount:(eur "60.00") "Grocer"))
     in
     let%bind (_ : Card_info.t) = ok (Fake_provider.set_card_status fake card.id Frozen) in
     let%bind frozen =
-      ok (Fake_provider.simulate_card_auth fake card.id ~amount:(eur "1.00") ~merchant:(merchant "Grocer"))
+      ok (Fake_provider.simulate_card_auth fake card.id (merchant ~amount:(eur "1.00") "Grocer"))
     in
     print_s
       [%sexp
@@ -76,7 +76,7 @@ let%expect_test "card: approve, decline, clear, refund" =
         , (too_much : Card_core.Response_code.t)
         , (frozen : Card_core.Response_code.t)];
     let%bind () =
-      ok (Fake_provider.refund_card fake card.id ~amount:(eur "2.50") ~merchant:(merchant "Grocer"))
+      ok (Fake_provider.refund_card fake card.id (merchant ~amount:(eur "2.50") "Grocer"))
     in
     events ();
     let%bind () = print_balance fake account.id in
@@ -88,38 +88,44 @@ let%expect_test "card: approve, decline, clear, refund" =
         (update
          (Auth_request
           ((auth auth_000001) (network_txn ntx_000001) (amount "12.50 EUR")
-           (merchant_amount "12.50 EUR")
-           (merchant ((name Grocer) (mcc 5411) (country DE)))
-           (entry_mode Ecommerce) (response 00) (decided_by Provider_default))))))
+           (approved "12.50 EUR")
+           (merchant ((name Grocer) (mcc 5411) (country DE) (amount "12.50 EUR")))
+           (entry_mode Ecommerce) (response 00) (decided_by Us))))))
       (evt_000008
        (Card (card card_000001)
         (update
-         (Clearing (clearing clr_000001) (auth (auth_000001))
-          (network_txn ntx_000001) (amount "12.50 EUR")
-          (merchant_amount "12.50 EUR")
-          (merchant ((name Grocer) (mcc 5411) (country DE)))))))
+         (Clearing
+          ((id clr_000001) (card_id card_000001) (network_txn_id (ntx_000001))
+           (auth_id (auth_000001)) (direction Debit)
+           (merchant ((name Grocer) (mcc 5411) (country DE) (amount "12.50 EUR")))
+           (billing "12.50 EUR") (fx ()) (final true)
+           (at "2026-10-13 09:00:00.000000002Z"))))))
       (evt_000009
        (Card (card card_000001)
         (update
          (Auth_request
           ((auth auth_000002) (network_txn ntx_000002) (amount "60.00 EUR")
-           (merchant_amount "60.00 EUR")
-           (merchant ((name Grocer) (mcc 5411) (country DE)))
-           (entry_mode Ecommerce) (response 51) (decided_by Provider_default))))))
+           (approved "0.00 EUR")
+           (merchant ((name Grocer) (mcc 5411) (country DE) (amount "60.00 EUR")))
+           (entry_mode Ecommerce) (response 51) (decided_by Us))))))
       (evt_000010 (Card (card card_000001) (update (Status_changed Frozen))))
       (evt_000011
        (Card (card card_000001)
         (update
          (Auth_request
           ((auth auth_000003) (network_txn ntx_000003) (amount "1.00 EUR")
-           (merchant_amount "1.00 EUR")
-           (merchant ((name Grocer) (mcc 5411) (country DE)))
-           (entry_mode Ecommerce) (response 57) (decided_by Provider_default))))))
+           (approved "0.00 EUR")
+           (merchant ((name Grocer) (mcc 5411) (country DE) (amount "1.00 EUR")))
+           (entry_mode Ecommerce) (response 57) (decided_by Us))))))
       (evt_000012
        (Card (card card_000001)
         (update
-         (Refund (clearing clr_000002) (network_txn ()) (amount "2.50 EUR")
-          (merchant ((name Grocer) (mcc 5411) (country DE)))))))
+         (Clearing
+          ((id clr_000002) (card_id card_000001) (network_txn_id ()) (auth_id ())
+           (direction Credit)
+           (merchant ((name Grocer) (mcc 5411) (country DE) (amount "2.50 EUR")))
+           (billing "2.50 EUR") (fx ()) (final true)
+           (at "2026-10-13 09:00:00.000000003Z"))))))
       ((available "40.00 EUR") (held "0.00 EUR") (posted "40.00 EUR"))
       |}];
     return ())
@@ -139,7 +145,7 @@ let%expect_test "card clearing: partial, above the authorization, reversal" =
     let%bind () =
       Deferred.List.iter ~how:`Sequential [ "20.00"; "30.00"; "10.00" ] ~f:(fun amount ->
         let%map (_ : Card_core.Response_code.t) =
-          ok (Fake_provider.simulate_card_auth fake card.id ~amount:(eur amount) ~merchant:(merchant ~mcc:5812 "Diner"))
+          ok (Fake_provider.simulate_card_auth fake card.id (merchant ~mcc:5812 ~amount:(eur amount) "Diner"))
         in
         ())
     in

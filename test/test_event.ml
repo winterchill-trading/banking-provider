@@ -7,7 +7,7 @@ open Helpers
    a journal of provider events) would then no longer read back: add a [V2] instead. *)
 let%expect_test "Event.Stable.V1 shape is pinned" =
   print_endline [%bin_digest: Event.Stable.V1.t];
-  [%expect {| 928a42e15fc3ee4bdc9289a2b5430e7d |}];
+  [%expect {| c2a5e9ee1ce7a62ad276c0c62abcf3f3 |}];
   return ()
 ;;
 

@@ -142,9 +142,11 @@ let challenge_of = function
   | Done _ -> failwith "expected a challenge"
 ;;
 
-let merchant ?(mcc = 5411) ?(country = "DE") name =
-  { Card_update.Merchant.name
-  ; mcc = Card_core.Mcc.of_int_exn mcc
-  ; country = Card_core.Country.of_string country
-  }
+let merchant ?(mcc = 5411) ?(country = "DE") ~amount name =
+  Card_core.Merchant.create
+    ~name
+    ~mcc:(Card_core.Mcc.of_int_exn mcc)
+    ~country:(Card_core.Country.of_string country)
+    ~amount
+  |> ok_exn
 ;;
