@@ -65,7 +65,7 @@ let ok d = Deferred.map d ~f:ok_exn
 (* [let events = event_printer fake in ... events ()] prints the events published since
    the previous call, one per line. *)
 let event_printer fake =
-  let seen = ref 0 in
+  let seen = ref (List.length (Fake_provider.published fake)) in
   fun () ->
     let all = Fake_provider.published fake in
     List.drop all !seen
@@ -97,4 +97,47 @@ let onboard ?(currency = Money.Currency.eur) ?(customer_id = "customer-1") fake 
   let%bind account = ok (Fake_provider.open_account fake customer.id currency) in
   let%map account = ok (Fake_provider.enrich_account fake account.id) in
   customer, account
+;;
+
+(* The example creditor IBAN from public IBAN references. *)
+let payee_iban = "FR1420041010050500013M02606"
+
+(* An outgoing SEPA draft from [account] (whose IBAN is the debtor) to [payee_iban]. *)
+let sepa_draft ?(rail = Payments_core.Rail.Sepa_credit) ~id (account : Account.t) amount =
+  let open Payments_core in
+  let beneficiary =
+    Beneficiary.create
+      ~id:(Beneficiary.Id.of_string ("ben-" ^ id))
+      ~owner:"customer-1"
+      ~name:"Payee"
+      ~rail
+      ~now:start
+      payee_iban
+    |> ok_exn
+  in
+  let party name iban = { Iso20022.Party.name; iban; bic = None; address = None } in
+  let details =
+    Transfer.Details.Sepa
+      (Sepa.Details.create
+         ~payment_id:
+           (Iso20022.Payment_id.generate ~transfer_id:id (Random.State.make [| 7 |]))
+         ~debtor:(party "Test Customer" (Option.value_exn (Account.iban account)))
+         ~creditor:(party "Payee" (Iban.of_string_exn payee_iban))
+         ())
+  in
+  Transfer.draft
+    ~id:(Transfer.Id.of_string id)
+    ~rail
+    ~account:(Ledger.Account_id.of_string "app:customer-1/eur")
+    ~beneficiary
+    ~amount
+    ~details
+    ~now:start
+    ()
+  |> ok_exn
+;;
+
+let challenge_of = function
+  | Sca_challenge.Or_challenge.Challenge c -> c
+  | Done _ -> failwith "expected a challenge"
 ;;
