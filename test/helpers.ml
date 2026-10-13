@@ -141,3 +141,10 @@ let challenge_of = function
   | Sca_challenge.Or_challenge.Challenge c -> c
   | Done _ -> failwith "expected a challenge"
 ;;
+
+let merchant ?(mcc = 5411) ?(country = "DE") name =
+  { Card_update.Merchant.name
+  ; mcc = Card_core.Mcc.of_int_exn mcc
+  ; country = Card_core.Country.of_string country
+  }
+;;
