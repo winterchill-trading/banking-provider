@@ -105,7 +105,10 @@ let%expect_test "random activity keeps the books balanced and statements consist
             Ledger.Journal.create ~time_source:ts ~fsync:false (dir ^/ Int.to_string !trial)
             |> ok_exn
           in
-          let fake = Fake_provider.create ~time_source:ts ~journal () |> ok_exn in
+          (* Manual settlement leaves payments and card authorizations held, so the
+             statement has to account for funds on hold. *)
+          let config = { Fake_provider.Config.default with settlement = Manual } in
+          let fake = Fake_provider.create ~config ~time_source:ts ~journal () |> ok_exn in
           (* [onboard] binds, and a bind runs as a later job even on a determined
              deferred; each fake call alone is determined at once. *)
           let customer =
