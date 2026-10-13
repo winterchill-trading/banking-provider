@@ -267,6 +267,11 @@ let card_state t id = find t.cards id ~what:"card" ~sexp_of_key:Ids.Card_id.sexp
 let ledger_account t id = Or_error.map (account_state t id) ~f:(fun a -> a.ledger)
 let balances t = Ledger.Journal.balances t.journal
 
+(* Booking and swap rules check their entries against the balances with this as
+   [recorded_at], and the ledger refuses a time before its last record; the journal's own
+   [now] never goes back, while the clock can stand still between two records. *)
+let booking_time t = Ledger.Journal.now t.journal
+
 (* Entries of one transition land together (one linked record), or not at all. *)
 let post t = function
   | [] -> Ok ()
@@ -620,7 +625,7 @@ let apply_update t (s : transfer_state) (update : Transfer_update.t) =
           s.transfer
           ~to_:after.status
           ~event_id:(Event.booking_event_id event)
-          ~at
+          ~at:(booking_time t)
         |> Or_error.bind ~f:(post t)
     in
     s.transfer <- after;
@@ -681,7 +686,7 @@ let submit t (s : transfer_state) =
       s.transfer
       ~to_:Submitted
       ~event_id:(Event.booking_event_id event)
-      ~at
+      ~at:(booking_time t)
   with
   | Error _ ->
     (* The hold failed: not enough available. The payment fails on our side. *)
@@ -690,15 +695,17 @@ let submit t (s : transfer_state) =
     in
     s.transfer <- failed;
     s.updated_at <- at;
-    ignore
-      (emit
-         t
-         (Transfer
+    (* The [Submitted] event was never published; its id goes to the failure instead. *)
+    publish
+      t
+      { event with
+        kind =
+          Transfer
             { transfer = s.transfer.id
             ; provider_ref = Option.value s.transfer.provider_ref ~default:""
             ; update = Failed Insufficient_funds
-            })
-       : Event.t)
+            }
+      }
   | Ok entries ->
     let%map () = post t entries in
     s.transfer <- submitted;
@@ -946,7 +953,7 @@ let simulate_deposit t ~account ~rail amount =
          (balances t)
          transfer
          ~event_id:(Event.booking_event_id event)
-         ~at:(now t)
+         ~at:(booking_time t)
      in
      let%map () = post t entries in
      let s = { transfer; updated_at = now t } in
@@ -1040,7 +1047,7 @@ let do_swap t (s : swap_state) =
       ~from_:a.ledger
       ~to_:b.ledger
       ~event_id:(Event.booking_event_id event)
-      ~now:(now t)
+      ~now:(booking_time t)
   with
   | Error e ->
     ignore
