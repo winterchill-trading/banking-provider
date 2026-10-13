@@ -19,3 +19,6 @@
    (:standard -source-tree-root .)))
  (preprocess
   (pps ppx_jane)))
+
+(cram
+ (deps %{bin:banking-provider}))
