@@ -50,7 +50,7 @@ module Config = struct
   ;;
 end
 
-module Make (P : Provider.S) (Sandbox : Provider.Sandbox with type t = P.t) = struct
+module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
   type scenario =
     { name : string
     ; run : P.t -> unit Or_error.t Deferred.t

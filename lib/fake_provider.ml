@@ -371,7 +371,7 @@ let complete_verification t id step ~code =
      state)
 ;;
 
-let simulate_kyc_decision t id (decision : Provider.Kyc_decision.t) =
+let simulate_kyc_decision t id (decision : Sandbox.Kyc_decision.t) =
   return
     (let open Or_error.Let_syntax in
      let%bind c = customer_state t id in

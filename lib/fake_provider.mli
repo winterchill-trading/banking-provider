@@ -16,7 +16,7 @@
     {b Settlement.} [Immediate] completes outgoing transfers, on-chain confirmations and
     card clearings at once; [Delayed span] schedules them on the time source (advance a
     synthetic clock to see them); [Manual] leaves them to
-    {!Provider.Sandbox.simulate_transfer_outcome} and {!clear_card_auth}.
+    {!Sandbox.S.simulate_transfer_outcome} and {!clear_card_auth}.
 
     {b Events.} Each event goes to every subscriber of {!events} and is also kept as a
     signed webhook delivery ({!webhook_deliveries}), so a test can redeliver them, out of
@@ -69,7 +69,7 @@ val create
   -> t Or_error.t
 
 include Provider.S with type t := t
-include Provider.Sandbox with type t := t
+include Sandbox.S with type t := t
 
 (** {2 Fake-only controls} *)
 

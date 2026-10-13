@@ -191,63 +191,6 @@ module type S = sig
   val ingest_webhook : t -> Webhook.Request.t -> Event.t list Or_error.t Deferred.t
 end
 
-module Kyc_decision = struct
-  type t =
-    | Approve
-    | Reject of string
-    | Request_resubmission of Kyc_core.Person.Field.t list
-  [@@deriving sexp, compare, equal]
-end
-
-(** What a sandbox can trigger that a customer cannot: the counterpart of a provider's
-    simulator endpoints. Optional; the fake implements all of it. *)
-module type Sandbox = sig
-  type t
-
-  (** An incoming payment to [account] on [rail]; returns our id for it (the
-      [Incoming_transfer] event's [transfer]). *)
-  val simulate_deposit
-    :  t
-    -> account:Account_ref.t
-    -> rail:Rail.t
-    -> Money.Amount.t
-    -> Transfer.Id.t Or_error.t Deferred.t
-
-  (** Decides the hosted identity steps (document, liveness) and the provider status. *)
-  val simulate_kyc_decision
-    :  t
-    -> Customer_ref.t
-    -> Kyc_decision.t
-    -> unit Or_error.t Deferred.t
-
-  (** A card-not-present authorization for the merchant's amount (in the card's billing
-      currency); returns the answer given. *)
-  val simulate_card_auth
-    :  t
-    -> Ids.Card_id.t
-    -> Card_core.Merchant.t
-    -> Response_code.t Or_error.t Deferred.t
-
-  (** The scheme's answer to an outgoing transfer (settle, reject, return, ...). *)
-  val simulate_transfer_outcome
-    :  t
-    -> Transfer.Id.t
-    -> Transfer_update.t
-    -> unit Or_error.t Deferred.t
-
-  (** A [Ping] event. *)
-  val ping : t -> unit Or_error.t Deferred.t
-end
-
 module type Provider = sig
   module type S = S
-  module type Sandbox = Sandbox
-
-  module Kyc_decision : sig
-    type t = Kyc_decision.t =
-      | Approve
-      | Reject of string
-      | Request_resubmission of Kyc_core.Person.Field.t list
-    [@@deriving sexp, compare, equal]
-  end
 end

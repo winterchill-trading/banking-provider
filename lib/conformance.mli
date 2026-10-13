@@ -29,7 +29,7 @@ module Config : sig
   val default : run_id:string -> t
 end
 
-module Make (P : Provider.S) (_ : Provider.Sandbox with type t = P.t) : sig
+module Make (P : Provider.S) (_ : Sandbox.S with type t = P.t) : sig
   type scenario =
     { name : string
     ; run : P.t -> unit Or_error.t Deferred.t
