@@ -1,0 +1,21 @@
+(library
+ (name banking_provider_test)
+ (libraries
+  banking-provider
+  core
+  core_unix
+  core_unix.filename_unix
+  async
+  async_kernel
+  money
+  ledger
+  kyc-core
+  payments-core
+  card-core
+  base_quickcheck
+  expect_test_helpers_core)
+ (inline_tests
+  (flags
+   (:standard -source-tree-root .)))
+ (preprocess
+  (pps ppx_jane)))
