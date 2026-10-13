@@ -7,7 +7,10 @@
 
     {b Booked.} Every movement is booked into the {!Ledger.Journal.t} given at creation
     with {!Payments_core.Booking} (transfers, deposits), {!Payments_core.Swap} (swaps) and
-    ledger holds (card authorizations), with the event id in each idempotency key. A
+    {!Card_core.Booking} (card authorizations, clearings, reversals, refunds), with the
+    event id in each idempotency key. Card authorizations are decided by
+    {!Card_core.Decision} (card status, limits, funds), as if the merchant had passed
+    3-D Secure. A
     balance is what the journal says, so the books always balance and an account cannot
     go below zero.
 
@@ -92,12 +95,12 @@ val reverse_card_auth
   -> unit
   -> unit Or_error.t Deferred.t
 
-(** A merchant refund to the card's account: a new credit. *)
+(** A merchant refund of [merchant]'s amount to the card's account: a credit clearing,
+    a new credit. *)
 val refund_card
   :  t
   -> Card_core.Ids.Card_id.t
-  -> amount:Money.Amount.t
-  -> merchant:Card_update.Merchant.t
+  -> Card_core.Merchant.t
   -> unit Or_error.t Deferred.t
 
 (** A verification-of-payee answer for a beneficiary, published as a [Payee_check]

@@ -91,15 +91,8 @@ type swap_state =
   }
 
 type auth =
-  { auth_id : Ids.Auth_id.t
-  ; network_txn : Ids.Network_txn_id.t
-  ; card_id : Ids.Card_id.t
-  ; amount : Money.Amount.t
-  ; merchant : Card_update.Merchant.t
-  ; authorized_at : Time_ns.t
-  ; hold : Ledger.Hold_id.t
-  ; mutable open_ : bool
-  ; mutable reversed : bool (** released in full, never cleared *)
+  { mutable auth : Card_core.Authorization.t
+  ; auth_merchant : Card_core.Merchant.t
   }
 
 type card_state =
@@ -122,6 +115,7 @@ type t =
   ; time_source : Time_source.t
   ; journal : Ledger.Journal.t
   ; chart : Booking.Chart.t
+  ; card_chart : Card_core.Booking.Chart.t
   ; counters : int String.Table.t
   ; customers : customer_state Customer_ref.Table.t
   ; customers_by_id : Customer_ref.t Kyc_core.Customer_id.Table.t
@@ -155,8 +149,12 @@ let hex s = Cryptokit.transform_string (Cryptokit.Hexa.encode ()) s
 let create ?(config = Config.default) ~time_source ~journal () =
   let open Or_error.Let_syntax in
   let chart = Booking.Chart.default in
+  let card_chart = Card_core.Booking.Chart.default in
   let%map () =
+    (* Both charts name the fee income accounts; open each id once. *)
     Booking.Chart.accounts chart ~rails:Rail.all ~currencies:supported_currencies
+    @ Card_core.Booking.Chart.accounts card_chart ~currencies:supported_currencies
+    |> List.stable_dedup ~compare:(Comparable.lift Ledger.Account_id.compare ~f:Ledger.Account.id)
     |> List.map ~f:(fun account ->
       Ledger.Journal.open_account journal account |> Or_error.map ~f:ignore)
     |> Or_error.all_unit
@@ -165,6 +163,7 @@ let create ?(config = Config.default) ~time_source ~journal () =
   ; time_source = Time_source.read_only time_source
   ; journal
   ; chart
+  ; card_chart
   ; counters = String.Table.create ()
   ; customers = Customer_ref.Table.create ()
   ; customers_by_id = Kyc_core.Customer_id.Table.create ()
@@ -1223,250 +1222,198 @@ let card_details_token t id =
        Sca_challenge.Or_challenge.Challenge (challenge_view challenge purpose)))
 ;;
 
-(* Holds for card authorizations expire after 7 days, 30 for lodging, car rental and
-   cruise merchants. *)
-let hold_timeout (merchant : Card_update.Merchant.t) =
-  Time_ns.Span.of_day (if Mcc.has_long_hold merchant.mcc then 30. else 7.)
-;;
-
-(* Approved spend counting against the card's caps: this UTC month's authorizations that
-   were not reversed in full, of which today's also count for the daily caps. *)
-let usage t (c : card_state) =
-  let date time = Time_ns.to_date time ~zone:Time_float.Zone.utc in
-  let today = date (now t) in
-  let same_month d =
-    Date.year d = Date.year today && Month.equal (Date.month d) (Date.month today)
-  in
+let auths_of_card t (c : card_state) =
   Hashtbl.data t.auths
-  |> List.filter ~f:(fun a ->
-    Ids.Card_id.equal a.card_id c.card.id
-    && (not a.reversed)
-    && same_month (date a.authorized_at))
-  |> List.sort ~compare:(Comparable.lift Ids.Auth_id.compare ~f:(fun a -> a.auth_id))
-  |> List.fold_result ~init:(Limits.Usage.zero c.card.currency) ~f:(fun usage a ->
-    let%map.Or_error added =
-      Limits.Usage.add usage a.amount ~atm:(Mcc.is_atm a.merchant.mcc)
-    in
-    if Date.equal (date a.authorized_at) today
-    then added
-    else { usage with monthly = added.monthly })
+  |> List.filter_map ~f:(fun a ->
+    Option.some_if (Ids.Card_id.equal a.auth.card_id c.card.id) a.auth)
 ;;
 
-let clear t (a : auth) ?amount () =
+(* Card bookings come from card-core's rules; an empty list books nothing. *)
+let post_card t entries =
+  match entries with
+  | [] -> Ok ()
+  | entries ->
+    Ledger.Journal.append_linked t.journal entries
+    |> Or_error.map ~f:(ignore : Ledger.Journal.Append_result.t -> unit)
+;;
+
+let card_event t card_id update = new_event t (Card { card = card_id; update })
+
+let clear_auth t (a : auth) ?amount () =
   let open Or_error.Let_syntax in
-  let%bind c = card_state t a.card_id in
-  let%bind acct = account_state t c.card_account in
-  let%bind hold =
-    Ledger.Balances.find_hold (balances t) a.hold
-    |> Or_error.of_option ~error:(Error.of_string "no hold for this authorization")
+  let%bind c = card_state t a.auth.card_id in
+  let billing = Option.value amount ~default:(Card_core.Authorization.open_hold a.auth) in
+  let%bind merchant = Card_core.Merchant.with_amount a.auth_merchant billing in
+  let%bind clearing =
+    Card_core.Settlement.Clearing.create
+      ~id:(Ids.Clearing_id.of_string (next_id t "clr"))
+      ~card_id:c.card.id
+      ~network_txn_id:a.auth.network_txn_id
+      ~auth_id:a.auth.id
+      ~direction:Debit
+      ~merchant
+      ~billing_currency:c.card.currency
+        (* card-core books a clearing at its own [at]: it must not be behind the
+           journal's last record. *)
+      ~at:(booking_time t)
+      ()
   in
-  let amount = Option.value amount ~default:hold.remaining in
-  let event =
-    new_event
-      t
-      (Card
-         { card = a.card_id
-         ; update =
-             Clearing
-               { clearing = Ids.Clearing_id.of_string (next_id t "clr")
-               ; auth = Some a.auth_id
-               ; network_txn = a.network_txn
-               ; amount
-               ; merchant_amount = amount
-               ; merchant = a.merchant
-               }
-         })
+  let%bind outcome = Card_core.Settlement.settle clearing ~auth:(Some a.auth) in
+  let event = card_event t c.card.id (Clearing clearing) in
+  let%bind entries =
+    Card_core.Booking.settled
+      t.card_chart
+      (balances t)
+      c.card
+      clearing
+      outcome
+      ~event_id:(Event.booking_event_id event)
   in
-  let key = Ledger.Idempotency_key.of_string (Event.booking_event_id event ^ "/capture") in
-  let to_ = t.chart.settlement Card_scheme acct.account.currency in
-  let%bind over = Money.Amount.compare_value amount hold.remaining in
-  let%map () =
-    (if over > 0
-     then
-       Ledger.Journal.over_capture
-         t.journal
-         ~hold_id:a.hold
-         ~amount
-         ~reason:"clearing above the authorization"
-         ~to_
-         ~idempotency_key:key
-         ~code:Card_settlement
-         ~reference:(Ids.Auth_id.to_string a.auth_id)
-         ~effective_at:(now t)
-         ()
-     else
-       Ledger.Journal.capture
-         t.journal
-         ~hold_id:a.hold
-         ~amount
-         ~release_remainder:true
-         ~to_
-         ~idempotency_key:key
-         ~code:Card_settlement
-         ~reference:(Ids.Auth_id.to_string a.auth_id)
-         ~effective_at:(now t)
-         ())
-    |> ok_unit
-  in
-  a.open_ <- false;
+  let%map () = post_card t entries in
+  (match outcome with
+   | Against_auth { auth; _ } -> a.auth <- auth
+   | Without_auth | Refund _ -> ());
   publish t event
 ;;
 
-let simulate_card_auth t id ~amount ~(merchant : Card_update.Merchant.t) =
+(* The merchant ran 3-D Secure and the cardholder passed it, so the decision does not
+   ask for SCA again (code 1A); the conformance suite needs a plain approval. *)
+let authenticated : Card_core.Three_ds.t = { trans_status = Y; eci = Some 5; cavv_present = true }
+
+let simulate_card_auth t id (merchant : Card_core.Merchant.t) =
   return
     (let open Or_error.Let_syntax in
      let%bind c = card_state t id in
      let%bind acct = account_state t c.card_account in
      let%bind () =
-       if Money.Currency.equal c.card.currency (Money.Amount.currency amount)
+       if Money.Currency.equal c.card.currency (Money.Amount.currency merchant.amount)
        then Ok ()
-       else Or_error.error_string "amount is not in the card's billing currency"
+       else Or_error.error_string "the fake charges in the card's billing currency only"
      in
-     let%bind usage = usage t c in
-     let%bind (response : Response_code.t) =
-       match Card.unusable c.card ~now:(now t) with
-       | Some code -> Ok code
-       | None ->
-         (match%bind
-            Limits.check
-              c.card.limits
-              ~usage
-              ~amount
-              ~mcc:merchant.mcc
-              ~country:merchant.country
-              ~entry_mode:Ecommerce
-          with
-          | Error violation -> Ok (Limits.Violation.response_code violation)
-          | Ok () ->
-            let available = Ledger.Balances.available (balances t) acct.ledger c.card.currency in
-            let%map cmp = Money.Amount.compare_value available amount in
-            if cmp < 0 then Response_code.Insufficient_funds else Approved)
+     let at = now t in
+     let request : Card_core.Authorization.Request.t =
+       { auth_id = Ids.Auth_id.of_string (next_id t "auth")
+       ; card_id = id
+       ; network_txn_id = Ids.Network_txn_id.of_string (next_id t "ntx")
+       ; kind = Auth
+       ; amount = merchant.amount
+       ; merchant
+       ; entry_mode = Ecommerce
+       ; initiator = Cardholder
+       ; estimated = false
+       ; partial_supported = false
+       ; three_ds = Some authenticated
+       ; exemption = None
+       ; cardholder_verified = false
+       ; at
+       }
      in
-     let auth_id = Ids.Auth_id.of_string (next_id t "auth") in
-     let network_txn = Ids.Network_txn_id.of_string (next_id t "ntx") in
+     let%bind usage =
+       Card_core.Authorization.usage (auths_of_card t c) ~currency:c.card.currency ~now:at
+     in
+     let decision =
+       Card_core.Decision.decide
+         { card = c.card
+         ; usage
+         ; available = Ledger.Balances.available (balances t) acct.ledger c.card.currency
+         ; sca_policy = Card_core.Card_sca.Policy.default
+         ; sca_counters = Sca.Counters.zero
+         ; request
+         ; open_auth = None
+         }
+         ~now:at
+     in
+     let%bind pending = Card_core.Authorization.pending request in
+     let%bind auth = Card_core.Decision.apply decision pending ~request in
+     let response = Card_core.Decision.response_code decision in
      let event =
-       new_event
+       card_event
          t
-         (Card
-            { card = id
-            ; update =
-                Auth_request
-                  { auth = auth_id
-                  ; network_txn
-                  ; amount
-                  ; merchant_amount = amount
-                  ; merchant
-                  ; entry_mode = Ecommerce
-                  ; response
-                  ; decided_by = Provider_default
-                  }
+         id
+         (Auth_request
+            { auth = auth.id
+            ; network_txn = auth.network_txn_id
+            ; amount = auth.requested
+            ; approved = auth.approved
+            ; merchant
+            ; entry_mode = auth.entry_mode
+            ; response
+            ; decided_by = auth.decided_by
             })
      in
-     let%map () =
-       if Response_code.is_approved response
-       then (
-         let hold = Ledger.Hold_id.of_string ("card:" ^ Ids.Auth_id.to_string auth_id) in
-         let%map () =
-           Ledger.Journal.hold
-             t.journal
-             ~hold_id:hold
-             ~account:acct.ledger
-             ~amount
-             ~timeout:(hold_timeout merchant)
-             ~idempotency_key:
-               (Ledger.Idempotency_key.of_string (Event.booking_event_id event ^ "/hold"))
-             ~code:Card_auth
-             ~reference:(Ids.Auth_id.to_string auth_id)
-             ~effective_at:(now t)
-             ()
-           |> ok_unit
-         in
-         let a =
-           { auth_id
-           ; network_txn
-           ; card_id = id
-           ; amount
-           ; merchant
-           ; authorized_at = now t
-           ; hold
-           ; open_ = true
-           ; reversed = false
-           }
-         in
-         Hashtbl.set t.auths ~key:auth_id ~data:a;
-         publish t event;
-         later t (fun () -> if a.open_ then clear t a () else Ok ()))
-       else Ok (publish t event)
+     let%bind entries =
+       Card_core.Booking.authorized
+         (balances t)
+         c.card
+         auth
+         ~event_id:(Event.booking_event_id event)
+         ~at:(booking_time t)
      in
+     let%map () = post_card t entries in
+     let a = { auth; auth_merchant = merchant } in
+     Hashtbl.set t.auths ~key:auth.id ~data:a;
+     publish t event;
+     if Card_core.Response_code.is_approved response
+     then
+       later t (fun () ->
+         if Card_core.Authorization.Status.is_open a.auth.status then clear_auth t a () else Ok ());
      response)
 ;;
 
 let auth_state t id = find t.auths id ~what:"authorization" ~sexp_of_key:Ids.Auth_id.sexp_of_t
 
 let clear_card_auth t id ?amount () =
-  return (Or_error.bind (auth_state t id) ~f:(fun a -> clear t a ?amount ()))
+  return (Or_error.bind (auth_state t id) ~f:(fun a -> clear_auth t a ?amount ()))
 ;;
 
 let reverse_card_auth t id ?amount () =
   return
     (let open Or_error.Let_syntax in
      let%bind a = auth_state t id in
-     let event =
-       new_event t (Card { card = a.card_id; update = Reversal { auth = id; amount } })
+     let%bind c = card_state t a.auth.card_id in
+     let%bind auth, released =
+       Card_core.Authorization.reverse a.auth ?amount ~at:(now t) ()
      in
-     let%map () =
-       Ledger.Journal.release
-         t.journal
-         ~hold_id:a.hold
-         ?amount
-         ~idempotency_key:
-           (Ledger.Idempotency_key.of_string (Event.booking_event_id event ^ "/release"))
-         ~reference:(Ids.Auth_id.to_string id)
-         ~effective_at:(now t)
-         ()
-       |> ok_unit
+     let event = card_event t c.card.id (Reversal { auth = id; amount = released }) in
+     let%bind entries =
+       Card_core.Booking.reversed
+         (balances t)
+         a.auth
+         ~amount:released
+         ~event_id:(Event.booking_event_id event)
+         ~at:(booking_time t)
      in
-     (match Ledger.Balances.find_hold (balances t) a.hold with
-      | Some h when Money.Amount.is_zero h.remaining && a.open_ ->
-        a.open_ <- false;
-        a.reversed <- true
-      | _ -> ());
+     let%map () = post_card t entries in
+     a.auth <- auth;
      publish t event)
 ;;
 
-let refund_card t id ~amount ~merchant =
+let refund_card t id (merchant : Card_core.Merchant.t) =
   return
     (let open Or_error.Let_syntax in
      let%bind c = card_state t id in
-     let%bind acct = account_state t c.card_account in
-     let event =
-       new_event
-         t
-         (Card
-            { card = id
-            ; update =
-                Refund
-                  { clearing = Ids.Clearing_id.of_string (next_id t "clr")
-                  ; network_txn = None
-                  ; amount
-                  ; merchant
-                  }
-            })
+     let%bind clearing =
+       Card_core.Settlement.Clearing.create
+         ~id:(Ids.Clearing_id.of_string (next_id t "clr"))
+         ~card_id:c.card.id
+         ~direction:Credit
+         ~merchant
+         ~billing_currency:c.card.currency
+         ~at:(booking_time t)
+         ()
      in
-     let%map () =
-       Ledger.Journal.transfer
-         t.journal
-         ~idempotency_key:
-           (Ledger.Idempotency_key.of_string (Event.booking_event_id event ^ "/refund"))
-         ~tag:"card_refund"
-         ~code:Refund
-         ~reference:(Ids.Card_id.to_string id)
-         ~effective_at:(now t)
-         [ Ledger.Posting.debit (t.chart.settlement Card_scheme c.card.currency) amount
-         ; Ledger.Posting.credit acct.ledger amount
-         ]
-       |> ok_unit
+     let%bind outcome = Card_core.Settlement.settle clearing ~auth:None in
+     let event = card_event t c.card.id (Clearing clearing) in
+     let%bind entries =
+       Card_core.Booking.settled
+         t.card_chart
+         (balances t)
+         c.card
+         clearing
+         outcome
+         ~event_id:(Event.booking_event_id event)
      in
+     let%map () = post_card t entries in
      publish t event)
 ;;
 
