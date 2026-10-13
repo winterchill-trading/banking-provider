@@ -95,6 +95,20 @@ val reverse_card_auth
   -> unit
   -> unit Or_error.t Deferred.t
 
+(** Expires every authorization whose hold has lapsed at the time source's current time
+    (7 days, 30 for lodging, car rental and cruise): the rest of the hold goes back and an
+    [Expiry] event is published. Returns their ids. *)
+val expire_card_auths : t -> Card_core.Ids.Auth_id.t list Or_error.t Deferred.t
+
+(** An advice: an authorization the scheme answered for us (stand-in) with [response],
+    recorded as decided. An approved advice holds the funds like any authorization. *)
+val simulate_card_advice
+  :  t
+  -> Card_core.Ids.Card_id.t
+  -> Card_core.Merchant.t
+  -> response:Card_core.Response_code.t
+  -> Card_core.Ids.Auth_id.t Or_error.t Deferred.t
+
 (** A merchant refund of [merchant]'s amount to the card's account: a credit clearing,
     a new credit. *)
 val refund_card

@@ -1388,6 +1388,95 @@ let reverse_card_auth t id ?amount () =
      publish t event)
 ;;
 
+let expire_card_auths t =
+  return
+    (let open Or_error.Let_syntax in
+     let at = now t in
+     Hashtbl.data t.auths
+     |> List.sort ~compare:(Comparable.lift Ids.Auth_id.compare ~f:(fun a -> a.auth.id))
+     |> List.filter ~f:(fun a -> Card_core.Authorization.is_due_to_expire a.auth ~now:at)
+     |> List.fold_result ~init:[] ~f:(fun expired a ->
+       let event = card_event t a.auth.card_id (Expiry { auth = a.auth.id }) in
+       let%bind entries =
+         Card_core.Booking.expired
+           (balances t)
+           a.auth
+           ~event_id:(Event.booking_event_id event)
+           ~at:(booking_time t)
+       in
+       let%bind () = post_card t entries in
+       let%map auth, (_ : Money.Amount.t) = Card_core.Authorization.expire a.auth ~now:at in
+       a.auth <- auth;
+       publish t event;
+       auth.id :: expired)
+     |> Or_error.map ~f:List.rev)
+;;
+
+let simulate_card_advice t id (merchant : Card_core.Merchant.t) ~response =
+  return
+    (let open Or_error.Let_syntax in
+     let%bind c = card_state t id in
+     let request : Card_core.Authorization.Request.t =
+       { auth_id = Ids.Auth_id.of_string (next_id t "auth")
+       ; card_id = id
+       ; network_txn_id = Ids.Network_txn_id.of_string (next_id t "ntx")
+       ; kind = Advice
+       ; amount = merchant.amount
+       ; merchant
+       ; entry_mode = Chip
+       ; initiator = Cardholder
+       ; estimated = false
+       ; partial_supported = false
+       ; three_ds = None
+       ; exemption = None
+       ; cardholder_verified = true
+       ; at = now t
+       }
+     in
+     let approved =
+       if Card_core.Response_code.is_approved response
+       then merchant.amount
+       else Money.Amount.zero c.card.currency
+     in
+     let%bind auth =
+       Card_core.Authorization.advice
+         request
+         ~approved
+         ~response_code:response
+         ~decided_by:Stand_in
+     in
+     let event =
+       card_event
+         t
+         id
+         (Auth_advice
+            { auth = auth.id
+            ; network_txn = auth.network_txn_id
+            ; amount = auth.requested
+            ; approved = auth.approved
+            ; merchant
+            ; entry_mode = auth.entry_mode
+            ; response
+            ; decided_by = auth.decided_by
+            })
+     in
+     (* card-core holds the approved amount. A stand-in approval above the available
+        balance cannot be held, so this returns an error for it; card-core books such a
+        shortfall only when the clearing arrives. *)
+     let%bind entries =
+       Card_core.Booking.authorized
+         (balances t)
+         c.card
+         auth
+         ~event_id:(Event.booking_event_id event)
+         ~at:(booking_time t)
+     in
+     let%map () = post_card t entries in
+     Hashtbl.set t.auths ~key:auth.id ~data:{ auth; auth_merchant = merchant };
+     publish t event;
+     auth.id)
+;;
+
 let refund_card t id (merchant : Card_core.Merchant.t) =
   return
     (let open Or_error.Let_syntax in
