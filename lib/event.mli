@@ -33,7 +33,8 @@ module Kind : sig
     | Account_updated of Account.t (** enriched with an IBAN or address, frozen, closed *)
     | Incoming_transfer of
         { account : Account_ref.Stable.V1.t
-        ; transfer : Transfer.Id.Stable.V1.t (** {!incoming_transfer_id} of [provider_ref] *)
+        ; transfer : Transfer.Id.Stable.V1.t
+        (** {!incoming_transfer_id} of [provider_ref] *)
         ; provider_ref : string
         ; rail : Rail.Stable.V1.t
         ; amount : Money.Amount.Stable.V1.t
@@ -99,10 +100,10 @@ val incoming_transfer_id : provider_ref:string -> Transfer.Id.t
     id. *)
 val booking_event_id : t -> string
 
-(** The kyc-core event for a [Kyc] event, applied to our case for [customer_id]; the
-    actor is [Provider provider]. [None] for other kinds. Provider events carry no
-    personal data, so the application opens the case itself ([Opened person]) before
-    applying these. *)
+(** The kyc-core event for a [Kyc] event, applied to our case for [customer_id]; the actor
+    is [Provider provider]. [None] for other kinds. Provider events carry no personal
+    data, so the application opens the case itself ([Opened person]) before applying
+    these. *)
 val to_kyc_event
   :  t
   -> customer_id:Kyc_core.Customer_id.t

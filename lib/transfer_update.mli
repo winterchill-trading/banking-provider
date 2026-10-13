@@ -1,10 +1,10 @@
 (** A change to a transfer as a provider reports it, and how it applies to our
     {!Payments_core.Transfer.t}.
 
-    Providers deliver these at least once and in no guaranteed order, so {!apply} treats
-    a report that the transfer has already moved past (a [Pending] after [Settled], the
-    same status twice) as {!Applied.Stale} rather than an error. Anything else the
-    transfer's state machine refuses is an error: a real inconsistency to look at. *)
+    Providers deliver these at least once and in no guaranteed order, so {!apply} treats a
+    report that the transfer has already moved past (a [Pending] after [Settled], the same
+    status twice) as {!Applied.Stale} rather than an error. Anything else the transfer's
+    state machine refuses is an error: a real inconsistency to look at. *)
 
 open! Core
 open Payments_core

@@ -1,8 +1,8 @@
 (** An account or wallet at the provider: one currency, owned by one customer.
 
-    Fiat accounts get an IBAN and crypto wallets a deposit address once {e enriched};
-    some providers assign them at once, others on request or minutes later, so
-    [addresses] may be empty right after opening. *)
+    Fiat accounts get an IBAN and crypto wallets a deposit address once {e enriched}; some
+    providers assign them at once, others on request or minutes later, so [addresses] may
+    be empty right after opening. *)
 
 open! Core
 open Payments_core

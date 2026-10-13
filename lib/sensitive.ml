@@ -10,8 +10,8 @@ let constant_time_equal a b =
   let la = String.length a
   and lb = String.length b in
   let n = Int.max la lb in
-  (* Fold every byte position of the longer string, so the time does not depend on
-     where the first difference is. *)
+  (* Fold every byte position of the longer string, so the time does not depend on where
+     the first difference is. *)
   let diff = ref (la lxor lb) in
   for i = 0 to n - 1 do
     let ca = if i < la then Char.to_int (String.unsafe_get a i) else 0 in

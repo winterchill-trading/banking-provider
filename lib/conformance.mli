@@ -4,8 +4,8 @@
     the same functor against its sandbox (behind an environment gate, since that needs
     credentials). The scenarios rely only on the contract in {!Provider.S}: results are
     awaited as events or by polling, within [timeout], so a sandbox that provisions an
-    IBAN minutes later or settles a payment asynchronously still passes. Every customer
-    id starts with [run_id], so reruns against a shared sandbox do not collide.
+    IBAN minutes later or settles a payment asynchronously still passes. Every customer id
+    starts with [run_id], so reruns against a shared sandbox do not collide.
 
     Each scenario returns [Ok ()] or an error saying what did not hold. *)
 
@@ -24,8 +24,8 @@ module Config : sig
     ; poll_interval : Time_ns.Span.t
     }
 
-  (** A synthetic person, [Fake_provider.sandbox_code], a public example IBAN, EUR 100
-      in and EUR 30 out, 10 second timeouts polled every 50 ms. *)
+  (** A synthetic person, [Fake_provider.sandbox_code], a public example IBAN, EUR 100 in
+      and EUR 30 out, 10 second timeouts polled every 50 ms. *)
   val default : run_id:string -> t
 end
 

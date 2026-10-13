@@ -154,7 +154,8 @@ let create ?(config = Config.default) ~time_source ~journal () =
     (* Both charts name the fee income accounts; open each id once. *)
     Booking.Chart.accounts chart ~rails:Rail.all ~currencies:supported_currencies
     @ Card_core.Booking.Chart.accounts card_chart ~currencies:supported_currencies
-    |> List.stable_dedup ~compare:(Comparable.lift Ledger.Account_id.compare ~f:Ledger.Account.id)
+    |> List.stable_dedup
+         ~compare:(Comparable.lift Ledger.Account_id.compare ~f:Ledger.Account.id)
     |> List.map ~f:(fun account ->
       Ledger.Journal.open_account journal account |> Or_error.map ~f:ignore)
     |> Or_error.all_unit
@@ -255,8 +256,13 @@ let find tbl key ~what ~sexp_of_key =
   | None -> Or_error.error_s [%message "not found" what (key : key)]
 ;;
 
-let customer_state t id = find t.customers id ~what:"customer" ~sexp_of_key:Customer_ref.sexp_of_t
-let account_state t id = find t.accounts id ~what:"account" ~sexp_of_key:Account_ref.sexp_of_t
+let customer_state t id =
+  find t.customers id ~what:"customer" ~sexp_of_key:Customer_ref.sexp_of_t
+;;
+
+let account_state t id =
+  find t.accounts id ~what:"account" ~sexp_of_key:Account_ref.sexp_of_t
+;;
 
 let transfer_state t id =
   find t.transfers id ~what:"transfer" ~sexp_of_key:Transfer.Id.sexp_of_t
@@ -294,7 +300,7 @@ let create_customer t ~customer_id ~person:(_ : Kyc_core.Person.t) =
        Hashtbl.set
          t.customers
          ~key:id
-        ~data:{ customer; kyc = Customer.Kyc_status.initial id };
+         ~data:{ customer; kyc = Customer.Kyc_status.initial id };
        Ok customer)
 ;;
 
@@ -308,7 +314,9 @@ let kyc_status t id = return (Or_error.map (customer_state t id) ~f:(fun c -> c.
 
 let set_step t (c : customer_state) step state =
   let open Or_error.Let_syntax in
-  let from = List.Assoc.find_exn c.kyc.steps step ~equal:Kyc_core.Verification.Step.equal in
+  let from =
+    List.Assoc.find_exn c.kyc.steps step ~equal:Kyc_core.Verification.Step.equal
+  in
   let%map state = Kyc_core.Verification.transition ~from ~to_:state in
   c.kyc <- Customer.Kyc_status.with_step c.kyc step state;
   ignore
@@ -396,10 +404,17 @@ let simulate_kyc_decision t id (decision : Provider.Kyc_decision.t) =
 
 (* {2 Accounts} *)
 
-let network_of_currency (currency : Money.Currency.t) : [ `Chain of Network.t | `Lightning | `Fiat ] Or_error.t =
-  match Money.Currency.kind currency, Money.Currency.code currency, Money.Currency.network currency with
+let network_of_currency (currency : Money.Currency.t)
+  : [ `Chain of Network.t | `Lightning | `Fiat ] Or_error.t
+  =
+  match
+    ( Money.Currency.kind currency
+    , Money.Currency.code currency
+    , Money.Currency.network currency )
+  with
   | Fiat, "EUR", None -> Ok `Fiat
-  | Fiat, _, _ -> Or_error.error_s [%message "the fake offers EUR only" (currency : Money.Currency.t)]
+  | Fiat, _, _ ->
+    Or_error.error_s [%message "the fake offers EUR only" (currency : Money.Currency.t)]
   | Crypto, "BTC", None -> Ok (`Chain Bitcoin)
   | Crypto, "BTC", Some "lightning" -> Ok `Lightning
   | Crypto, _, (None | Some "ethereum") -> Ok (`Chain Ethereum)
@@ -417,7 +432,9 @@ let address_for t (account : Account.t) =
   match%bind network_of_currency account.currency with
   | `Fiat ->
     (* German layout: 8-digit bank code and 10-digit account number. *)
-    let number = Int.of_string (String.drop_prefix (Account_ref.to_string account.id) 4) in
+    let number =
+      Int.of_string (String.drop_prefix (Account_ref.to_string account.id) 4)
+    in
     let bban = sprintf "50010517%010d" number in
     let check = Iban.check_digits ~country:"DE" ~bban in
     let%map iban = Iban.of_string ("DE" ^ check ^ bban) in
@@ -426,7 +443,8 @@ let address_for t (account : Account.t) =
   | `Chain network ->
     let raw =
       match network with
-      | Bitcoin -> Bech32.encode_segwit ~hrp:"bc" ~version:0 ~program:(String.prefix seed 20)
+      | Bitcoin ->
+        Bech32.encode_segwit ~hrp:"bc" ~version:0 ~program:(String.prefix seed 20)
       | Bitcoin_testnet ->
         Bech32.encode_segwit ~hrp:"tb" ~version:0 ~program:(String.prefix seed 20)
       | Ethereum | Polygon -> "0x" ^ hex (String.prefix seed 20)
@@ -472,7 +490,9 @@ let open_account t id currency =
      | Some a -> Ok a.account
      | None ->
        let account_id = Account_ref.of_string (next_id t "acc") in
-       let ledger = Ledger.Account_id.of_string ("fake:" ^ Account_ref.to_string account_id) in
+       let ledger =
+         Ledger.Account_id.of_string ("fake:" ^ Account_ref.to_string account_id)
+       in
        let%bind () =
          Ledger.Journal.open_account
            t.journal
@@ -504,7 +524,9 @@ let accounts t id =
        Hashtbl.data t.accounts
        |> List.filter_map ~f:(fun a ->
          Option.some_if (Customer_ref.equal a.account.customer id) a.account)
-       |> List.sort ~compare:(Comparable.lift Account_ref.compare ~f:(fun (a : Account.t) -> a.id))))
+       |> List.sort
+            ~compare:
+              (Comparable.lift Account_ref.compare ~f:(fun (a : Account.t) -> a.id))))
 ;;
 
 let enrich_account t id = return (Or_error.bind (account_state t id) ~f:(enrich t))
@@ -530,18 +552,16 @@ let code_of_kind : Ledger.Entry.Kind.t -> string = function
   | Hold_capture _ | Hold_over_capture _ -> "CAPTURE"
 ;;
 
-(* A bank statement shows posted money: the account together with its pending
-   sub-account. Placing or releasing a hold moves money between the two and nets to zero,
-   so it drops out; a capture shows as the payment. *)
+(* A bank statement shows posted money: the account together with its pending sub-account.
+   Placing or releasing a hold moves money between the two and nets to zero, so it drops
+   out; a capture shows as the payment. *)
 let statement t id ~from ~until =
   return
     (let open Or_error.Let_syntax in
      let%bind a = account_state t id in
      let currency = a.account.currency in
      let records = Ledger.Journal.records t.journal in
-     let side account =
-       Ledger.Statement.create ~from ~until records ~account ~currency
-     in
+     let side account = Ledger.Statement.create ~from ~until records ~account ~currency in
      let%bind main = side a.ledger in
      let%bind pending = side (Ledger.Account_id.pending a.ledger) in
      let signed (l : Ledger.Statement.Line.t) =
@@ -649,7 +669,9 @@ let apply_update t (s : transfer_state) (update : Transfer_update.t) =
 let settle_steps t (s : transfer_state) : Transfer_update.t list =
   match s.transfer.rail, s.transfer.details with
   | Lightning, Lightning { payment_hash = Some _; _ } ->
-    let preimage = hex (digest ("fake-preimage:" ^ Transfer.Id.to_string s.transfer.id)) in
+    let preimage =
+      hex (digest ("fake-preimage:" ^ Transfer.Id.to_string s.transfer.id))
+    in
     [ Lightning_paid { preimage } ]
   | Onchain _, _ ->
     let tx = digest ("fake-tx:" ^ Transfer.Id.to_string s.transfer.id) in
@@ -673,8 +695,7 @@ let schedule_settlement t (s : transfer_state) =
       apply_update t s update))
 ;;
 
-(* Submits an authorized transfer: holds the funds, or fails it when they are not
-   there. *)
+(* Submits an authorized transfer: holds the funds, or fails it when they are not there. *)
 let submit t (s : transfer_state) =
   let open Or_error.Let_syntax in
   let at = now t in
@@ -752,7 +773,8 @@ let payee_of (transfer : Transfer.t) =
 ;;
 
 let customer_of_account t from =
-  Or_error.map (account_state t from) ~f:(fun a -> Customer_ref.to_string a.account.customer)
+  Or_error.map (account_state t from) ~f:(fun a ->
+    Customer_ref.to_string a.account.customer)
 ;;
 
 (* Lightning payments to an address or LNURL get a payment hash we can settle with a
@@ -791,7 +813,8 @@ let initiate_transfer t ~from (draft : Transfer.t) =
          | Draft, Out -> Ok ()
          | status, _ ->
            Or_error.error_s
-             [%message "only outgoing drafts can be initiated" (status : Transfer.Status.t)]
+             [%message
+               "only outgoing drafts can be initiated" (status : Transfer.Status.t)]
        in
        let%bind () =
          if Money.Currency.equal a.account.currency (Money.Amount.currency draft.amount)
@@ -801,11 +824,7 @@ let initiate_transfer t ~from (draft : Transfer.t) =
        let%bind fee = fee_for t ~rail:draft.rail draft.amount in
        let transfer =
          with_lightning_hash
-           { draft with
-             account = a.ledger
-           ; fee
-           ; provider_ref = Some (next_id t "tr")
-           }
+           { draft with account = a.ledger; fee; provider_ref = Some (next_id t "tr") }
        in
        let at = now t in
        let s = { transfer; updated_at = at } in
@@ -855,8 +874,12 @@ let cancel_transfer t id =
      let%map () = apply_update t s Cancelled in
      (match s.transfer.authorization with
       | Some (Sca challenge) ->
-        Hashtbl.change t.challenges challenge ~f:(Option.map ~f:(fun c ->
-          { c with challenge = Sca.Challenge.cancel c.challenge }))
+        Hashtbl.change
+          t.challenges
+          challenge
+          ~f:
+            (Option.map ~f:(fun c ->
+               { c with challenge = Sca.Challenge.cancel c.challenge }))
       | _ -> ());
      info s)
 ;;
@@ -867,8 +890,8 @@ let simulate_transfer_outcome t id update =
 
 (* {2 Deposits} *)
 
-(* The example IBAN printed in many public IBAN references; it validates and belongs to
-   no customer of ours. *)
+(* The example IBAN printed in many public IBAN references; it validates and belongs to no
+   customer of ours. *)
 let sandbox_sender_iban = "DE89370400440532013000"
 let sandbox_sender_name = "Sandbox Sender"
 
@@ -1062,7 +1085,8 @@ let do_swap t (s : swap_state) =
   with
   | Error e ->
     ignore
-      (emit t (Swap_failed { swap = s.quote.id; reason = Error.to_string_hum e }) : Event.t);
+      (emit t (Swap_failed { swap = s.quote.id; reason = Error.to_string_hum e })
+       : Event.t);
     Ok ()
   | Ok entries ->
     let%map (_ : Ledger.Journal.Append_result.t) =
@@ -1143,10 +1167,16 @@ let issue_virtual_card t ~request_id customer ~account =
            ~month:(Month.to_int (Date.month date))
            ~year:(Date.year date + 3)
        in
-       let%bind last4 = Masked_pan.Last4.of_string_or_error (sprintf "%04d" (n % 10_000)) in
+       let%bind last4 =
+         Masked_pan.Last4.of_string_or_error (sprintf "%04d" (n % 10_000))
+       in
        let%map card = Card.activate card ~masked_pan:{ last4; expiry } ~at in
        let c =
-         { card; card_customer = customer; card_account = account; details_unlocked_until = None }
+         { card
+         ; card_customer = customer
+         ; card_account = account
+         ; details_unlocked_until = None
+         }
        in
        Hashtbl.set t.cards ~key:id ~data:c;
        Hashtbl.set t.card_requests ~key:request_id ~data:id;
@@ -1162,7 +1192,9 @@ let cards t customer =
        Hashtbl.data t.cards
        |> List.filter ~f:(fun c -> Customer_ref.equal c.card_customer customer)
        |> List.map ~f:card_info
-       |> List.sort ~compare:(Comparable.lift Ids.Card_id.compare ~f:(fun (c : Card_info.t) -> c.id))))
+       |> List.sort
+            ~compare:
+              (Comparable.lift Ids.Card_id.compare ~f:(fun (c : Card_info.t) -> c.id))))
 ;;
 
 let set_card_status t id status =
@@ -1173,7 +1205,8 @@ let set_card_status t id status =
      let%map card = Card.transition c.card ~to_:status ~at:(now t) in
      c.card <- card;
      if not (Card.Status.equal before card.status)
-     then ignore (emit t (Card { card = id; update = Status_changed card.status }) : Event.t);
+     then
+       ignore (emit t (Card { card = id; update = Status_changed card.status }) : Event.t);
      card_info c)
 ;;
 
@@ -1253,8 +1286,8 @@ let clear_auth t (a : auth) ?amount () =
       ~direction:Debit
       ~merchant
       ~billing_currency:c.card.currency
-        (* card-core books a clearing at its own [at]: it must not be behind the
-           journal's last record. *)
+        (* card-core books a clearing at its own [at]: it must not be behind the journal's
+           last record. *)
       ~at:(booking_time t)
       ()
   in
@@ -1276,9 +1309,11 @@ let clear_auth t (a : auth) ?amount () =
   publish t event
 ;;
 
-(* The merchant ran 3-D Secure and the cardholder passed it, so the decision does not
-   ask for SCA again (code 1A); the conformance suite needs a plain approval. *)
-let authenticated : Card_core.Three_ds.t = { trans_status = Y; eci = Some 5; cavv_present = true }
+(* The merchant ran 3-D Secure and the cardholder passed it, so the decision does not ask
+   for SCA again (code 1A); the conformance suite needs a plain approval. *)
+let authenticated : Card_core.Three_ds.t =
+  { trans_status = Y; eci = Some 5; cavv_present = true }
+;;
 
 let simulate_card_auth t id (merchant : Card_core.Merchant.t) =
   return
@@ -1356,11 +1391,15 @@ let simulate_card_auth t id (merchant : Card_core.Merchant.t) =
      if Card_core.Response_code.is_approved response
      then
        later t (fun () ->
-         if Card_core.Authorization.Status.is_open a.auth.status then clear_auth t a () else Ok ());
+         if Card_core.Authorization.Status.is_open a.auth.status
+         then clear_auth t a ()
+         else Ok ());
      response)
 ;;
 
-let auth_state t id = find t.auths id ~what:"authorization" ~sexp_of_key:Ids.Auth_id.sexp_of_t
+let auth_state t id =
+  find t.auths id ~what:"authorization" ~sexp_of_key:Ids.Auth_id.sexp_of_t
+;;
 
 let clear_card_auth t id ?amount () =
   return (Or_error.bind (auth_state t id) ~f:(fun a -> clear_auth t a ?amount ()))
@@ -1405,7 +1444,9 @@ let expire_card_auths t =
            ~at:(booking_time t)
        in
        let%bind () = post_card t entries in
-       let%map auth, (_ : Money.Amount.t) = Card_core.Authorization.expire a.auth ~now:at in
+       let%map auth, (_ : Money.Amount.t) =
+         Card_core.Authorization.expire a.auth ~now:at
+       in
        a.auth <- auth;
        publish t event;
        auth.id :: expired)
@@ -1553,7 +1594,8 @@ let run_standing_orders t =
   return
     (let open Or_error.Let_syntax in
      Hashtbl.data t.orders
-     |> List.sort ~compare:(Comparable.lift Standing_order_ref.compare ~f:(fun s -> s.order_ref))
+     |> List.sort
+          ~compare:(Comparable.lift Standing_order_ref.compare ~f:(fun s -> s.order_ref))
      |> List.filter ~f:(fun s -> (not s.cancelled) && is_confirmed t s)
      |> List.fold_result ~init:[] ~f:(fun started s ->
        match%bind Standing_order.run s.order ~now:(now t) ~zone:Time_float.Zone.utc with
@@ -1640,7 +1682,9 @@ let confirm_sca t id ~code =
        then (
          (* One sandbox code stands for both elements, as one OTP completes SCA in
             provider sandboxes; the challenge still records two categories. *)
-         let challenge, outcome = Sca.record c.challenge ~now:at ~kind:Otp ~correct:true in
+         let challenge, outcome =
+           Sca.record c.challenge ~now:at ~kind:Otp ~correct:true
+         in
          match outcome with
          | Factor_accepted _ -> Sca.record challenge ~now:at ~kind:Pin ~correct:true
          | _ -> challenge, outcome)

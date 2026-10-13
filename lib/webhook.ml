@@ -8,13 +8,15 @@ module Request = struct
   [@@deriving sexp_of, compare, equal]
 
   let header t name =
-    List.find_map t.headers ~f:(fun (k, v) -> Option.some_if (String.Caseless.equal k name) v)
+    List.find_map t.headers ~f:(fun (k, v) ->
+      Option.some_if (String.Caseless.equal k name) v)
   ;;
 end
 
 let hmac_sha256_hex ~key message =
   let mac = Cryptokit.MAC.hmac_sha256 (Sensitive.reveal key) in
-  Cryptokit.hash_string mac message |> Cryptokit.transform_string (Cryptokit.Hexa.encode ())
+  Cryptokit.hash_string mac message
+  |> Cryptokit.transform_string (Cryptokit.Hexa.encode ())
 ;;
 
 module Timestamped = struct

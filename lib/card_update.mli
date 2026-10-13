@@ -3,8 +3,8 @@
     types.
 
     These are messages, not state: card-core's state machines ({!Card_core.Authorization},
-    {!Card_core.Settlement}) decide what they mean for a card and its holds. A clearing may
-    be partial, repeated, above the authorization or without one; a refund is a credit
+    {!Card_core.Settlement}) decide what they mean for a card and its holds. A clearing
+    may be partial, repeated, above the authorization or without one; a refund is a credit
     clearing, never an edit of the purchase. Merchant names pass {!Card_core.Pan_guard}
     ({!Card_core.Merchant.create}) before they get here. *)
 

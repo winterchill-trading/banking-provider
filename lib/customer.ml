@@ -23,7 +23,8 @@ module Kyc_status = struct
     { customer
     ; status = Created
     ; tier = T0
-    ; steps = List.map Verification.Step.all ~f:(fun step -> step, Verification.State.Pending)
+    ; steps =
+        List.map Verification.Step.all ~f:(fun step -> step, Verification.State.Pending)
     }
   ;;
 

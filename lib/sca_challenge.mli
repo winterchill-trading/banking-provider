@@ -1,11 +1,11 @@
 (** A strong customer authentication challenge issued by the provider for one operation.
 
     Providers that move money under their own licence run SCA themselves: the operation
-    stops until the customer answers a code (SMS OTP, authenticator app), and the
-    provider binds the code to the operation's amount and payee. The challenge says what
-    it is for; {!Provider.S.confirm_sca} answers it, and the operation then proceeds (its
-    result arrives as an event or a status query). The code itself is a {!Sensitive.t}
-    and is never kept. *)
+    stops until the customer answers a code (SMS OTP, authenticator app), and the provider
+    binds the code to the operation's amount and payee. The challenge says what it is for;
+    {!Provider.S.confirm_sca} answers it, and the operation then proceeds (its result
+    arrives as an event or a status query). The code itself is a {!Sensitive.t} and is
+    never kept. *)
 
 open! Core
 open Payments_core
@@ -15,7 +15,8 @@ module Purpose : sig
     | Transfer of Transfer.Id.t
     | Swap of Swap.Id.t
     | Standing_order of Standing_order_ref.t
-    | Card_details of Card_core.Ids.Card_id.t (** revealing a card's number through the provider *)
+    | Card_details of Card_core.Ids.Card_id.t
+    (** revealing a card's number through the provider *)
   [@@deriving sexp, compare, equal]
 end
 

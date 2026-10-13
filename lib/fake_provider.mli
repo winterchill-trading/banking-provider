@@ -9,15 +9,14 @@
     with {!Payments_core.Booking} (transfers, deposits), {!Payments_core.Swap} (swaps) and
     {!Card_core.Booking} (card authorizations, clearings, reversals, refunds), with the
     event id in each idempotency key. Card authorizations are decided by
-    {!Card_core.Decision} (card status, limits, funds), as if the merchant had passed
-    3-D Secure. A
-    balance is what the journal says, so the books always balance and an account cannot
-    go below zero.
+    {!Card_core.Decision} (card status, limits, funds), as if the merchant had passed 3-D
+    Secure. A balance is what the journal says, so the books always balance and an account
+    cannot go below zero.
 
     {b Settlement.} [Immediate] completes outgoing transfers, on-chain confirmations and
     card clearings at once; [Delayed span] schedules them on the time source (advance a
-    synthetic clock to see them); [Manual] leaves them to {!Provider.Sandbox.simulate_transfer_outcome}
-    and {!clear_card_auth}.
+    synthetic clock to see them); [Manual] leaves them to
+    {!Provider.Sandbox.simulate_transfer_outcome} and {!clear_card_auth}.
 
     {b Events.} Each event goes to every subscriber of {!events} and is also kept as a
     signed webhook delivery ({!webhook_deliveries}), so a test can redeliver them, out of
@@ -50,8 +49,8 @@ module Config : sig
     ; auto_enrich : bool (** assign IBANs and addresses when an account opens *)
     }
 
-  (** Immediate settlement, SCA on, no fees, BTC, ETH, USDC and USDT rates against EUR,
-      no spread, a fixed test webhook key, no auto-enrichment. *)
+  (** Immediate settlement, SCA on, no fees, BTC, ETH, USDC and USDT rates against EUR, no
+      spread, a fixed test webhook key, no auto-enrichment. *)
   val default : t
 end
 
@@ -78,8 +77,8 @@ include Provider.Sandbox with type t := t
     returns our ids of the transfers it started. *)
 val run_standing_orders : t -> Transfer.Id.t list Or_error.t Deferred.t
 
-(** Clears an approved card authorization: the whole remainder by default, part of it,
-    or more than it (an over-capture, e.g. a tip). *)
+(** Clears an approved card authorization: the whole remainder by default, part of it, or
+    more than it (an over-capture, e.g. a tip). *)
 val clear_card_auth
   :  t
   -> Card_core.Ids.Auth_id.t
@@ -95,8 +94,8 @@ val reverse_card_auth
   -> unit
   -> unit Or_error.t Deferred.t
 
-(** Expires every authorization whose hold has lapsed at the time source's current time
-    (7 days, 30 for lodging, car rental and cruise): the rest of the hold goes back and an
+(** Expires every authorization whose hold has lapsed at the time source's current time (7
+    days, 30 for lodging, car rental and cruise): the rest of the hold goes back and an
     [Expiry] event is published. Returns their ids. *)
 val expire_card_auths : t -> Card_core.Ids.Auth_id.t list Or_error.t Deferred.t
 
@@ -109,16 +108,15 @@ val simulate_card_advice
   -> response:Card_core.Response_code.t
   -> Card_core.Ids.Auth_id.t Or_error.t Deferred.t
 
-(** A merchant refund of [merchant]'s amount to the card's account: a credit clearing,
-    a new credit. *)
+(** A merchant refund of [merchant]'s amount to the card's account: a credit clearing, a
+    new credit. *)
 val refund_card
   :  t
   -> Card_core.Ids.Card_id.t
   -> Card_core.Merchant.t
   -> unit Or_error.t Deferred.t
 
-(** A verification-of-payee answer for a beneficiary, published as a [Payee_check]
-    event. *)
+(** A verification-of-payee answer for a beneficiary, published as a [Payee_check] event. *)
 val simulate_payee_check
   :  t
   -> Beneficiary.Id.t

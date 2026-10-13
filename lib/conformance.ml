@@ -196,8 +196,7 @@ module Make (P : Provider.S) (Sandbox : Provider.Sandbox with type t = P.t) = st
     poll config ~what:"the transfer to finish" (fun () ->
       let%map info = P.transfer t id in
       Option.some_if
-        (Transfer.Status.is_final info.status
-         || Transfer.Status.equal info.status Settled)
+        (Transfer.Status.is_final info.status || Transfer.Status.equal info.status Settled)
         info)
   ;;
 
@@ -259,7 +258,12 @@ module Make (P : Provider.S) (Sandbox : Provider.Sandbox with type t = P.t) = st
             in
             Pipe.close_read events;
             let%map (_ : Money.Amount.t) =
-              available config t account.id ~what:"the deposit" ~f:(equal_amount config.deposit)
+              available
+                config
+                t
+                account.id
+                ~what:"the deposit"
+                ~f:(equal_amount config.deposit)
             in
             ())
       }
@@ -284,7 +288,9 @@ module Make (P : Provider.S) (Sandbox : Provider.Sandbox with type t = P.t) = st
                 !"payment ended %{sexp: Transfer.Status.t}"
                 info.status
             in
-            let%bind expected = Deferred.return (Money.Amount.sub config.deposit quote.total) in
+            let%bind expected =
+              Deferred.return (Money.Amount.sub config.deposit quote.total)
+            in
             let%map (_ : Money.Amount.t) =
               available config t account.id ~what:"the debit" ~f:(equal_amount expected)
             in
@@ -312,7 +318,9 @@ module Make (P : Provider.S) (Sandbox : Provider.Sandbox with type t = P.t) = st
             let%bind quote =
               P.quote_fee t ~from:account.id ~rail:Sepa_instant config.payment
             in
-            let%bind expected = Deferred.return (Money.Amount.sub config.deposit quote.total) in
+            let%bind expected =
+              Deferred.return (Money.Amount.sub config.deposit quote.total)
+            in
             let%bind balance = P.balance t account.id in
             check_d
               (equal_amount balance.available expected)

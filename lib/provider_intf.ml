@@ -24,8 +24,8 @@ module Response_code = Card_core.Response_code
     ({!transfer}, {!kyc_status}) exist for reconciliation and for a poll after a missed
     webhook.
 
-    {b SCA.} Operations that move money may stop with a {!Sca_challenge.t}; answer it
-    with {!confirm_sca} and the operation proceeds. *)
+    {b SCA.} Operations that move money may stop with a {!Sca_challenge.t}; answer it with
+    {!confirm_sca} and the operation proceeds. *)
 module type S = sig
   type t
 
@@ -145,8 +145,8 @@ module type S = sig
   val card : t -> Ids.Card_id.t -> Card_info.t Or_error.t Deferred.t
   val cards : t -> Customer_ref.t -> Card_info.t list Or_error.t Deferred.t
 
-  (** Freeze ([Frozen]), unfreeze ([Active]), block or destroy, as card-core's
-      transition table allows. *)
+  (** Freeze ([Frozen]), unfreeze ([Active]), block or destroy, as card-core's transition
+      table allows. *)
   val set_card_status
     :  t
     -> Ids.Card_id.t
@@ -159,8 +159,8 @@ module type S = sig
     -> Limits.t
     -> Card_info.t Or_error.t Deferred.t
 
-  (** A short-lived token for the provider's hosted card-number component. Needs SCA:
-      the first call returns a challenge; after it is accepted, call again. *)
+  (** A short-lived token for the provider's hosted card-number component. Needs SCA: the
+      first call returns a challenge; after it is accepted, call again. *)
   val card_details_token
     :  t
     -> Ids.Card_id.t
@@ -168,9 +168,9 @@ module type S = sig
 
   (** {2 Standing orders} *)
 
-  (** Registers a standing order (from {!Payments_core.Standing_order.create}) paid
-      from [from]; confirmed once by SCA, then each run arrives as a
-      [Standing_order_run] event. *)
+  (** Registers a standing order (from {!Payments_core.Standing_order.create}) paid from
+      [from]; confirmed once by SCA, then each run arrives as a [Standing_order_run]
+      event. *)
   val create_standing_order
     :  t
     -> from:Account_ref.t
@@ -181,8 +181,8 @@ module type S = sig
 
   (** {2 Events} *)
 
-  (** A new subscription: every event published from now on, normalized. Close the
-      reader to unsubscribe. *)
+  (** A new subscription: every event published from now on, normalized. Close the reader
+      to unsubscribe. *)
   val events : t -> Event.t Pipe.Reader.t
 
   (** Verifies a webhook delivery on its raw bytes with the provider's own material,
@@ -220,8 +220,8 @@ module type Sandbox = sig
     -> Kyc_decision.t
     -> unit Or_error.t Deferred.t
 
-  (** A card-not-present authorization for the merchant's amount (in the card's
-      billing currency); returns the answer given. *)
+  (** A card-not-present authorization for the merchant's amount (in the card's billing
+      currency); returns the answer given. *)
   val simulate_card_auth
     :  t
     -> Ids.Card_id.t

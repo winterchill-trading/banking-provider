@@ -18,7 +18,8 @@ module Kyc_status : sig
   type t =
     { customer : Customer_ref.t
     ; status : Kyc_core.Status.t
-    ; tier : Kyc_core.Tier.t (** by {!Kyc_core.Tier.Rules.default} over the verified steps *)
+    ; tier : Kyc_core.Tier.t
+    (** by {!Kyc_core.Tier.Rules.default} over the verified steps *)
     ; steps : (Kyc_core.Verification.Step.t * Kyc_core.Verification.State.t) list
     }
   [@@deriving sexp, compare, equal]

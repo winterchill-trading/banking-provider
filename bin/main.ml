@@ -1,8 +1,7 @@
 (* banking-provider: run the fake provider offline.
 
-   demo         onboarding, a deposit, a payment with SCA, a swap and a card purchase,
-                printing every event and the final balances
-   conformance  the conformance suite against the fake *)
+   demo onboarding, a deposit, a payment with SCA, a swap and a card purchase, printing
+   every event and the final balances conformance the conformance suite against the fake *)
 
 open! Core
 open Async
@@ -20,8 +19,8 @@ let with_journal journal_path f =
     | None ->
       let dir = Filename_unix.temp_dir "banking-provider" "demo" in
       ( dir ^/ "journal"
-      , fun () ->
-          ignore (Core_unix.system (sprintf "rm -rf %s" (Filename.quote dir)) : _) )
+      , fun () -> ignore (Core_unix.system (sprintf "rm -rf %s" (Filename.quote dir)) : _)
+      )
   in
   let journal = Ledger.Journal.create ~fsync:false path |> Or_error.ok_exn in
   let%map result = Monitor.protect (fun () -> f journal) ~finally:(fun () -> return ()) in
@@ -34,7 +33,9 @@ let confirm fake = function
   | Sca_challenge.Or_challenge.Done _ -> return ()
   | Challenge (c : Sca_challenge.t) ->
     printf "SCA challenge %s, answering with the sandbox code\n" (Sca.Id.to_string c.id);
-    let%map (_ : Sca_challenge.Result.t) = ok (Fake_provider.confirm_sca fake c.id ~code) in
+    let%map (_ : Sca_challenge.Result.t) =
+      ok (Fake_provider.confirm_sca fake c.id ~code)
+    in
     ()
 ;;
 
@@ -57,11 +58,18 @@ let demo journal_path =
            ~person)
     in
     let%bind () = ok (Fake_provider.simulate_kyc_decision fake customer.id Approve) in
-    let%bind account = ok (Fake_provider.open_account fake customer.id Money.Currency.eur) in
+    let%bind account =
+      ok (Fake_provider.open_account fake customer.id Money.Currency.eur)
+    in
     let%bind account = ok (Fake_provider.enrich_account fake account.id) in
     let%bind btc = ok (Fake_provider.open_account fake customer.id Money.Currency.btc) in
     let%bind (_ : Transfer.Id.t) =
-      ok (Fake_provider.simulate_deposit fake ~account:account.id ~rail:Sepa_instant (eur "500.00"))
+      ok
+        (Fake_provider.simulate_deposit
+           fake
+           ~account:account.id
+           ~rail:Sepa_instant
+           (eur "500.00"))
     in
     let iban = Option.value_exn (Account.iban account) in
     let payee = "FR1420041010050500013M02606" in
@@ -145,9 +153,7 @@ let conformance () =
       Fake_provider.create ~time_source:(Time_source.wall_clock ()) ~journal ()
       |> Or_error.ok_exn
     in
-    let%map results =
-      Suite.run_all (Conformance.Config.default ~run_id:"cli") fake
-    in
+    let%map results = Suite.run_all (Conformance.Config.default ~run_id:"cli") fake in
     List.iter results ~f:(fun (name, r) ->
       printf "%s %s\n" (if Or_error.is_ok r then "ok  " else "FAIL") name;
       Result.iter_error r ~f:(fun e -> printf "     %s\n" (Error.to_string_hum e)));
