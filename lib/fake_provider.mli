@@ -23,7 +23,18 @@
     order, through {!ingest_webhook} the way a real provider would.
 
     {b SCA.} Transfers, swaps, standing orders and card details need a challenge, answered
-    with {!sandbox_code}, unless [sca] is off in the config. *)
+    with {!sandbox_code}, unless [sca] is off in the config.
+
+    {b Currencies.} EUR accounts get a German IBAN and GBP accounts a UK sort code
+    ([99-00-00], which no bank uses) and account number; crypto accounts get an address on
+    their network. GBP moves on Faster Payments (settles at once), CHAPS and Bacs (pending,
+    then settled).
+
+    {b Payee checks.} {!verify_payee} answers what {!simulate_payee_check} last fixed for
+    the beneficiary; otherwise it goes by the last two characters of the account number or
+    IBAN: [96] [Unavailable], [97] [Close_match] (the name with initials), [98] [No_match],
+    [99] [Account_not_found], anything else [Match]. Crypto, Lightning and internal
+    destinations are [Not_possible]. *)
 
 open! Core
 open Async_kernel
@@ -123,7 +134,8 @@ val refund_card
   -> Card_core.Merchant.t
   -> unit Or_error.t Deferred.t
 
-(** A verification-of-payee answer for a beneficiary, published as a [Payee_check] event. *)
+(** A payee check answer for a beneficiary, published as a [Payee_check] event and
+    returned by every later {!verify_payee} for it. *)
 val simulate_payee_check
   :  t
   -> Beneficiary.Id.t

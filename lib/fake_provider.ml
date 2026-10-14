@@ -128,6 +128,7 @@ type t =
   ; card_requests : Ids.Card_id.t String.Table.t
   ; auths : auth Ids.Auth_id.Table.t
   ; orders : order_state Standing_order_ref.Table.t
+  ; payee_checks : Beneficiary.Payee_check.t Beneficiary.Id.Table.t
   ; mutable subscribers : Event.t Pipe.Writer.t list
   ; published : Event.t Queue.t
   ; deliveries : Webhook.Request.t Queue.t
@@ -186,6 +187,7 @@ let create ?(config = Config.default) ?(counters = []) ~time_source ~journal () 
   ; card_requests = String.Table.create ()
   ; auths = Ids.Auth_id.Table.create ()
   ; orders = Standing_order_ref.Table.create ()
+  ; payee_checks = Beneficiary.Id.Table.create ()
   ; subscribers = []
   ; published = Queue.create ()
   ; deliveries = Queue.create ()
@@ -1751,7 +1753,40 @@ let confirm_sca t id ~code =
 (* {2 Other simulations} *)
 
 let simulate_payee_check t beneficiary result =
+  Hashtbl.set t.payee_checks ~key:beneficiary ~data:result;
   return (Ok (ignore (emit t (Payee_check { beneficiary; result }) : Event.t)))
+;;
+
+(* "Ada Lovelace Example" -> "A L Example": what a bank's record often holds instead. *)
+let initials_form name =
+  match List.rev (String.split name ~on:' ' |> List.filter ~f:(Fn.non String.is_empty)) with
+  | [] | [ _ ] -> String.uppercase name
+  | last :: rest ->
+    List.rev_map rest ~f:(fun w -> String.prefix w 1 |> String.uppercase) @ [ last ]
+    |> String.concat ~sep:" "
+;;
+
+let verify_payee t ~customer (beneficiary : Beneficiary.t) =
+  return
+    (let open Or_error.Let_syntax in
+     let%map (_ : customer_state) = customer_state t customer in
+     match Hashtbl.find t.payee_checks beneficiary.id with
+     | Some result -> result
+     | None ->
+       (* Deterministic answers by the account number's last two characters, so tests
+          can reach every outcome; anything else matches. *)
+       let by_suffix number : Beneficiary.Payee_check.t =
+         match String.suffix number 2 with
+         | "96" -> Unavailable
+         | "97" -> Close_match { suggested_name = initials_form beneficiary.name }
+         | "98" -> No_match
+         | "99" -> Account_not_found
+         | _ -> Match
+       in
+       (match beneficiary.destination with
+        | Uk_account a -> by_suffix a.account_number
+        | Bank_account { iban; _ } -> by_suffix (Iban.to_string iban)
+        | Crypto _ | Lightning _ | Internal _ -> Not_possible))
 ;;
 
 let ping t = return (Ok (ignore (emit t Ping : Event.t)))
