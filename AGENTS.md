@@ -103,6 +103,9 @@ Do not poll in a loop.
   provider lacks answers `Sandbox.unsupported`.
 - `dune promote` fills cram output. Read the diff before promoting; it overwrites edits made
   after the failing run.
+- Optional provider capabilities (such as `Provider.Payee_details`) are separate module
+  types next to `Provider.S`, never new values in it: every adapter includes `Provider.S`
+  in its interface, so a new value there breaks them all.
 
 ## Where to read more
 
