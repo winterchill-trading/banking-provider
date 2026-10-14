@@ -133,3 +133,24 @@ let%expect_test "GBP with a Faster Payments fee and delayed settlement" =
       ok   verify_payee answers, and a simulated answer is returned
       |}])
 ;;
+
+let%expect_test "the fake passes the USD conformance run" =
+  with_fake (fun ~clock:_ ~journal:_ fake ->
+    let%map results = Suite.run_all (Conformance.Config.usd ~run_id:"conf-usd") fake in
+    print_results results;
+    [%expect
+      {|
+      ok   create_customer is idempotent on our customer id
+      ok   a KYC approval is published as an event and reported by kyc_status
+      ok   an approved customer gets a USD account with a routing and account number
+      ok   a deposit is published once and credits the balance
+      ok   a payment confirmed by SCA settles and debits amount plus fee
+      ok   initiating the same transfer twice pays once
+      ok   a payment above the balance does not leave the account
+      ok   a wrong SCA code is refused without naming a factor
+      ok   a webhook with a bad signature is refused
+      ok   a test delivery arrives as a Ping event
+      ok   a virtual card is approved, and declined with 57 once frozen
+      ok   verify_payee answers, and a simulated answer is returned
+      |}])
+;;

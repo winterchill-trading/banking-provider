@@ -157,3 +157,69 @@ let%expect_test "payee checks" =
       true
       |}])
 ;;
+
+let%expect_test "USD accounts and US payments" =
+  with_fake (fun ~clock:_ ~journal:_ fake ->
+    let usd s = Money.Amount.of_decimal_string Money.Currency.usd s |> ok_exn in
+    let%bind customer, account = onboard ~currency:Money.Currency.usd fake in
+    print_s
+      [%sexp
+        (Account.us_account account |> Option.map ~f:Us_account.to_string : string option)];
+    let events = event_printer fake in
+    let%bind (_ : Transfer.Id.t) =
+      ok
+        (Fake_provider.simulate_deposit fake ~account:account.id ~rail:Rtp (usd "100.00"))
+    in
+    let beneficiary =
+      Beneficiary.create
+        ~id:(Beneficiary.Id.of_string "ben-us")
+        ~owner:"customer-1"
+        ~name:"Ada Example"
+        ~rail:Rtp
+        ~now:start
+        "021000021 123456789"
+      |> ok_exn
+    in
+    let draft =
+      Transfer.draft
+        ~id:(Transfer.Id.of_string "ach-1")
+        ~rail:(Ach { sec = Ppd; same_day = true })
+        ~account:(Ledger.Account_id.of_string "app:customer-1/usd")
+        ~beneficiary
+        ~amount:(usd "40.00")
+        ~now:start
+        ()
+      |> ok_exn
+    in
+    let%bind started = ok (Fake_provider.initiate_transfer fake ~from:account.id draft) in
+    let%bind (_ : Sca_challenge.Result.t) =
+      ok (Fake_provider.confirm_sca fake (challenge_of started).id ~code)
+    in
+    events ();
+    let%bind () = print_balance fake account.id in
+    let%map check =
+      ok (Fake_provider.verify_payee fake ~customer:customer.id beneficiary)
+    in
+    print_s [%sexp (check : Beneficiary.Payee_check.t)];
+    [%expect
+      {|
+      ("123456780 0000000001 checking")
+      (evt_000005
+       (Incoming_transfer (account acc_000001) (transfer in:dep_000001)
+        (provider_ref dep_000001) (rail Rtp) (amount "100.00 USD") (fee "0.00 USD")
+        (from
+         (External (name "Sandbox Sender")
+          (detail "123456780 0000000001 checking")))
+        (reference "deposit dep_000001")
+        (details (Us_domestic ((scheme_ref (dep_000001)) (effective_date ()))))
+        (settled true)))
+      (evt_000006
+       (Transfer (transfer ach-1) (provider_ref tr_000001) (update Submitted)))
+      (evt_000007
+       (Transfer (transfer ach-1) (provider_ref tr_000001) (update Pending)))
+      (evt_000008
+       (Transfer (transfer ach-1) (provider_ref tr_000001) (update Settled)))
+      ((available "60.00 USD") (held "0.00 USD") (posted "60.00 USD"))
+      Not_possible
+      |}])
+;;
