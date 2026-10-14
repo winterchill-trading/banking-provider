@@ -21,6 +21,8 @@ module Address : sig
     (** Lightning receives by invoice; the node id says where invoices come from *)
     | Uk_account of Uk_account.Stable.V1.t
     (** a UK sort code and account number, for Faster Payments, CHAPS and Bacs *)
+    | Us_account of Us_account.Stable.V1.t
+    (** a US routing and account number, for ACH, RTP and Fedwire *)
   [@@deriving sexp, compare, equal]
 
   (** [bin_io] on [t] is {!Stable.V1}, so records that embed an address (events,
@@ -33,7 +35,8 @@ module Address : sig
     end
 
     module V1 : sig
-      (** The first three addresses' format; writing a [Uk_account] raises. *)
+      (** The first three addresses' format; writing a [Uk_account], a [Us_account] or a
+          crypto address on a newer network raises. *)
       type nonrec t = t [@@deriving bin_io, sexp, compare, equal]
     end
   end
@@ -74,6 +77,9 @@ val crypto_address : t -> Crypto_address.t option
 
 (** The sort code and account number, from a [Uk_account] address or a GB IBAN. *)
 val uk_account : t -> Uk_account.t option
+
+(** The routing and account number of a [Us_account] address. *)
+val us_account : t -> Us_account.t option
 
 module Balance : sig
   (** On the customer's side: a deposit makes [posted] grow. [available = posted - held],
