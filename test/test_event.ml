@@ -191,15 +191,15 @@ let%expect_test "Event.Stable.V2 shape is pinned" =
   print_endline [%bin_digest: Account.Stable.V2.t];
   [%expect
     {|
-    ac2ba69014259cf2f011f9c10ff090dc
-    9e6fff8d90b478d7c7ab070a2af10eea
+    05fda6bd6b93386a62cca84f0eb3a71d
+    f156ce7cb90b8c2bca621892007375e3
     |}];
   return ()
 ;;
 
 (* A GBP deposit names a UK rail, UK details and an account with a sort code: V1 cannot
-   write it and V2 round-trips it. The KYC events and the still empty opened account
-   carry nothing UK-specific, so V1 writes those. *)
+   write it and V2 round-trips it. The KYC events and the still empty opened account carry
+   nothing UK-specific, so V1 writes those. *)
 let%expect_test "UK events need V2" =
   with_fake (fun ~clock:_ ~journal:_ fake ->
     let%bind _customer, account = onboard ~currency:Money.Currency.gbp fake in
