@@ -1964,8 +1964,8 @@ let verify_payee t ~customer (beneficiary : Beneficiary.t) =
        (match beneficiary.destination with
         | Uk_account a -> by_suffix a.account_number
         | Bank_account { iban; _ } -> by_suffix (Iban.to_string iban)
-        (* No US scheme checks payee names. *)
-        | Crypto _ | Lightning _ | Internal _ | Us_account _ -> Not_possible))
+        (* No US scheme checks payee names, and the fake knows no local scheme that does. *)
+        | Crypto _ | Lightning _ | Internal _ | Us_account _ | Local _ -> Not_possible))
 ;;
 
 let ping t = return (Ok (ignore (emit t Ping : Event.t)))
