@@ -14,8 +14,8 @@
     - US: routing number [123456780] (valid check digit) and a ten-digit account number
       ({!us_account}).
     - KG: a {!Account.Address.Local} with a bank code and a sixteen-digit account number
-      ({!kg}).
-    - CH: an IBAN and the matching QR-IBAN ({!ch}). *)
+      ({!val-kg}).
+    - CH: an IBAN and the matching QR-IBAN ({!val-ch}). *)
 
 open! Core
 open Payments_core
@@ -85,5 +85,5 @@ val ch : key:string -> Account.Address.t list
 (** {2 By currency} *)
 
 (** The details a fiat account in [currency] gets: EUR {!eu_iban}, GBP {!uk_account}, USD
-    {!us_account}, CHF {!ch}, KGS {!kg}. Fails for other currencies. *)
+    {!us_account}, CHF {!val-ch}, KGS {!val-kg}. Fails for other currencies. *)
 val for_currency : Money.Currency.t -> key:string -> Account.Address.t list Or_error.t

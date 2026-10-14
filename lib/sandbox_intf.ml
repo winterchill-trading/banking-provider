@@ -116,7 +116,7 @@ module type S = sig
       calling the [simulate_*] values above. Without [customer] the setting is the default
       for every customer; with it, an override for that customer that wins over the
       default (set it again to change it). A sandbox without such controls answers
-      {!unsupported}. *)
+      [Sandbox.unsupported]. *)
 
   (** [Manual] (the default): KYC waits for {!simulate_kyc_decision}.
       [Decide { outcome; delay }]: [delay] after the customer starts a hosted verification
@@ -131,9 +131,9 @@ module type S = sig
     -> Kyc_simulation.t
     -> unit Or_error.t Deferred.t
 
-  (** How {!simulate_deposit} lands (the default is {!Deposit_simulation.default}: at
-      once, credited). With a [delay], the deposit is reported at once as pending and
-      settles [delay] later on the implementation's clock; [Bounce reason] rejects it with
+  (** How {!simulate_deposit} lands (the default is [Deposit_simulation.default]: at once,
+      credited). With a [delay], the deposit is reported at once as pending and settles
+      [delay] later on the implementation's clock; [Bounce reason] rejects it with
       [reason] instead of settling, and nothing is credited. [customer] is the owner of
       the account the deposit goes to. *)
   val set_deposit_simulation
