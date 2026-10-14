@@ -52,7 +52,7 @@ module Kind : sig
     | Payee_check of
         { beneficiary : Beneficiary.Id.Stable.V1.t
         ; result : Beneficiary.Payee_check.t
-        } (** verification of payee (SEPA name check) *)
+        } (** a payee-name check (SEPA Verification of Payee, UK Confirmation of Payee) *)
     | Swap_executed of
         { swap : Swap.Id.Stable.V1.t
         ; sell : Money.Amount.Stable.V1.t
@@ -75,6 +75,68 @@ module Kind : sig
     | Ping (** a test delivery *)
   [@@deriving bin_io, sexp, compare, equal]
 
+  (** [bin_io] on [t] is {!Stable.V1}. *)
+  module Stable : sig
+    module V1 : sig
+      (** UK rails, accounts and details raise; newer payee check results are written as
+          [Not_possible]. *)
+      type nonrec t = t [@@deriving bin_io, sexp, compare, equal]
+    end
+
+    module V2 : sig
+      type nonrec t = t =
+        | Kyc of
+            { customer : Customer_ref.Stable.V1.t
+            ; update : Kyc_update.t
+            }
+        | Account_opened of Account.Stable.V2.t
+        | Account_updated of Account.Stable.V2.t
+        | Incoming_transfer of
+            { account : Account_ref.Stable.V1.t
+            ; transfer : Transfer.Id.Stable.V1.t
+            ; provider_ref : string
+            ; rail : Rail.Stable.V2.t
+            ; amount : Money.Amount.Stable.V1.t
+            ; fee : Money.Amount.Stable.V1.t
+            ; from : Transfer.Counterparty.Stable.V2.t
+            ; reference : string
+            ; details : Transfer.Details.Stable.V2.t
+            ; settled : bool
+            }
+        | Transfer of
+            { transfer : Transfer.Id.Stable.V1.t
+            ; provider_ref : string
+            ; update : Transfer_update.t
+            }
+        | Payee_check of
+            { beneficiary : Beneficiary.Id.Stable.V1.t
+            ; result : Beneficiary.Payee_check.Stable.V2.t
+            }
+        | Swap_executed of
+            { swap : Swap.Id.Stable.V1.t
+            ; sell : Money.Amount.Stable.V1.t
+            ; fee : Money.Amount.Stable.V1.t
+            ; buy : Money.Amount.Stable.V1.t
+            }
+        | Swap_failed of
+            { swap : Swap.Id.Stable.V1.t
+            ; reason : string
+            }
+        | Card of
+            { card : Card_core.Ids.Card_id.Stable.V1.t
+            ; update : Card_update.t
+            }
+        | Standing_order_run of
+            { order : Standing_order_ref.Stable.V1.t
+            ; run_date : Date.Stable.V1.t
+            ; transfer : Transfer.Id.Stable.V1.t
+            }
+        | Ping
+
+      [@@deriving bin_io, sexp, compare, equal]
+    end
+  end
+
   (** The constructor name, for logs and metrics. *)
   val name : t -> string
 end
@@ -88,6 +150,13 @@ type t =
 
 module Stable : sig
   module V1 : sig
+    (** The format before the UK rails (digest [c2a5e9ee…]); see {!Kind.Stable.V1}. *)
+    type nonrec t = t [@@deriving bin_io, sexp, compare, equal]
+  end
+
+  (** Rails, accounts, counterparties, details and payee checks in their V2 formats: use
+      this to persist events that can be about UK payments. *)
+  module V2 : sig
     type nonrec t = t [@@deriving bin_io, sexp, compare, equal]
   end
 end
