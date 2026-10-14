@@ -10,14 +10,15 @@ this page explains the choices.
 | --- | --- | --- |
 | Customers | `create_customer`, `update_customer`, `kyc_status` | Send our `Kyc_core.Customer_id.t` as the provider's external id and look it up before creating, so a resend returns the same customer. |
 | Verification | `start_verification`, `complete_verification` | E-mail and mobile are codes (`Code_sent`); document and liveness are the provider's hosted flow (`Hosted` with a `Sensitive.t` token); their result arrives as `Kyc` events. |
-| Accounts | `open_account`, `accounts`, `balance`, `enrich_account`, `statement` | One account per customer and currency; `enrich_account` is idempotent and may return no address yet (some providers provision IBANs minutes after approval). Balances are on the customer's side: available, held, posted. |
-| Transfers | `quote_fee`, `initiate_transfer`, `transfer`, `cancel_transfer` | The draft's `Transfer.Id.t` is the provider idempotency key. The draft's `account` names our ledger account and is not sent. |
+| Accounts | `open_account`, `accounts`, `balance`, `enrich_account`, `statement` | One account per customer and currency; `enrich_account` is idempotent and may return no address yet (some providers provision IBANs minutes after approval). A UK account's address is `Uk_account` (sort code and account number); give a GB IBAN too if the provider has one. Balances are on the customer's side: available, held, posted. |
+| Transfers | `quote_fee`, `initiate_transfer`, `transfer`, `cancel_transfer` | The draft's `Transfer.Id.t` is the provider idempotency key. The draft's `account` names our ledger account and is not sent. GBP payments are drafted on `Faster_payments`, `Chaps` or `Bacs` with `Uk_domestic` details; put the scheme's payment id in `scheme_ref` when it is known. |
+| Payee checks | `verify_payee` | Confirmation of Payee (UK) or Verification of Payee (SEPA) for a beneficiary, on behalf of the paying customer. Map the scheme's answers to `Match`, `Close_match` (with the name the bank holds), `No_match`, `Not_possible` (the bank cannot check this account), `Account_not_found` and `Unavailable` (time-out, outage: retryable). Return an error only when the request itself failed. Destinations no scheme checks answer `Not_possible`. |
 | SCA | `confirm_sca` | One call for every challenge; the challenge's `purpose` says what resumes. |
 | Swaps | `quote_swap`, `execute_swap` | The outcome is an event (`Swap_executed`, `Swap_failed`). |
 | Cards | `issue_virtual_card`, `card`, `cards`, `set_card_status`, `set_card_limits`, `card_details_token` | `request_id` makes issuing idempotent. The card number is shown only through the provider's hosted component, after SCA. |
 | Standing orders | `create_standing_order`, `cancel_standing_order` | Confirmed once by SCA; each run is a `Standing_order_run` event followed by the transfer's events. |
 | Events | `events`, `ingest_webhook` | See below. |
-| Sandbox | `simulate_deposit`, `simulate_kyc_decision`, `simulate_card_auth`, `simulate_transfer_outcome`, `ping` | Map to the provider's simulator endpoints where they exist. |
+| Sandbox | `simulate_deposit`, `simulate_kyc_decision`, `simulate_card_auth`, `simulate_transfer_outcome`, `simulate_payee_check`, `ping` | Map to the provider's simulator endpoints where they exist. `simulate_payee_check` fixes the answer for one beneficiary: publish it as a `Payee_check` event and return it from later `verify_payee` calls for that beneficiary (a provider whose simulator sets the next answer only can keep it per beneficiary in the adapter). |
 
 ## Events
 
@@ -43,6 +44,13 @@ this page explains the choices.
   decided it, reversals, clearings (a credit clearing is a refund) and expiries.
 - **Deposits** are `Incoming_transfer` with our id `Event.incoming_transfer_id
   ~provider_ref`, so later reports about the same deposit name the same transfer.
+- **UK payments.** Faster Payments, CHAPS and Bacs statuses map to the direct updates
+  (`Submitted`, `Pending`, `Settled`, `Rejected`, `Returned`); give rejects and returns a
+  four-character ISO reason where the scheme has one. Deposits carry the rail, GBP and
+  `Uk_domestic` details.
+- **Persisting events.** `Event.Stable.V1` cannot hold UK rails, accounts or details
+  (writing raises) and writes the newer payee check answers as `Not_possible`; an inbox
+  or journal that may see GBP must use `Event.Stable.V2`.
 - **No personal data.** KYC events carry steps and status transitions only.
 
 ## Lessons from the fake
@@ -82,3 +90,18 @@ let%expect_test "conformance against the sandbox" =
 Give the run a unique `run_id` (customer ids start with it), the sandbox's OTP as
 `sca_code`, a payee IBAN the sandbox accepts and a timeout long enough for account
 provisioning.
+
+The suite runs in the config's currency over its rail. `Config.default` is EUR over SCT
+Inst (accounts must show an IBAN); `Config.gbp ~run_id` is GBP over Faster Payments
+(accounts must show a sort code and account number, or a GB IBAN), with a UK resident
+and the payee `99-00-00 87654321`. Set `payee` to a destination the sandbox accepts for
+the rail. A provider that holds only GBP runs `Config.gbp`, so the EUR-only scenarios
+no longer fail on the currency:
+
+```ocaml
+let config = { (Conformance.Config.gbp ~run_id) with payee = Some "04-00-04 12345678" } in
+Suite.run_all config provider
+```
+
+The account scenario keeps its original name for EUR over SEPA and is named after the
+currency and the address otherwise.
