@@ -11,7 +11,7 @@ runs the same scenarios against any implementation, the fake included.
 
 | Path | Holds |
 | --- | --- |
-| `lib/` | Library `banking_provider`: `Provider`, `Sandbox`, `Event`, `Transfer_update`, `Card_update`, `Webhook`, `Inbox`, `Sensitive`, `Fake_provider`, `Conformance` (see `lib/AGENTS.md`) |
+| `lib/` | Library `banking_provider`: `Provider`, `Sandbox`, `Event`, `Transfer_update`, `Card_update`, `Webhook`, `Inbox`, `Sensitive`, `Fake_provider`, `Fake_details`, `Conformance` (see `lib/AGENTS.md`) |
 | `bin/` | `banking-provider` executable: `demo` and `conformance` (see `bin/AGENTS.md`) |
 | `test/` | Expect, Quickcheck and cram tests (see `test/AGENTS.md`) |
 | `docs/` | `contract.md`: what an adapter must normalize and why |
@@ -90,8 +90,17 @@ Do not poll in a loop.
   window to test de-duplication, or the request fails at the signature check first.
 - `Event.Stable.V1` and the unversioned `bin_io` of `Account` keep their old format and raise
   on UK rails, accounts and details; persist with `Event.Stable.V2` / `Account.Stable.V2`.
+  V2 in turn raises on `Account.Address.Local`; V3 holds it. A new address variant means a
+  new version with the previous one as an `Of_binable` that raises on it.
+- The fake's account details come from the open-account key (`Fake_details`), not from
+  the account counter; do not reintroduce counter-derived IBANs, a restart would change
+  them.
+- Delayed KYC and deposit simulations are timers on the fake's time source. Under a
+  synthetic clock they fire only when the test advances it; the conformance tests tick
+  the clock in the background for that reason.
 - Adding a value to `Provider.S` or `Sandbox.S` breaks every adapter: build striga-provider,
-  griffin-provider and lightspark-provider after such a change.
+  griffin-provider and lightspark-provider after such a change. A sandbox control the
+  provider lacks answers `Sandbox.unsupported`.
 - `dune promote` fills cram output. Read the diff before promoting; it overwrites edits made
   after the failing run.
 

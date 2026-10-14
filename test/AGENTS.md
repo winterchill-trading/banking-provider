@@ -9,3 +9,7 @@ Tests for `banking_provider` and its CLI.
   reading the diff.
 - Run: `dune build --root .. @banking-provider/runtest` from the repository root.
 - Use a synthetic clock and pin times; a wall-clock dependency makes outputs flaky.
+  Advance it with `Time_source.advance_by_alarms_by` to fire delayed KYC decisions and
+  deposits (`test_fake_simulation.ml`).
+- `test_fake_details.ml` and `test_fake_open_key.ml` cover the keyed details; register
+  KGS with `Money.Currency.register` before opening a KGS account.
