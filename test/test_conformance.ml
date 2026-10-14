@@ -28,6 +28,7 @@ let%expect_test "the fake passes the conformance suite" =
       ok   a webhook with a bad signature is refused
       ok   a test delivery arrives as a Ping event
       ok   a virtual card is approved, and declined with 57 once frozen
+      ok   verify_payee answers, and a simulated answer is returned
       |}])
 ;;
 
@@ -67,5 +68,6 @@ let%expect_test "with a fee and delayed settlement" =
       ok   a webhook with a bad signature is refused
       ok   a test delivery arrives as a Ping event
       ok   a virtual card is approved, and declined with 57 once frozen
+      ok   verify_payee answers, and a simulated answer is returned
       |}])
 ;;
