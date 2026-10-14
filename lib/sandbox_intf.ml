@@ -51,6 +51,15 @@ module type S = sig
     -> Transfer_update.t
     -> unit Or_error.t Deferred.t
 
+  (** Fixes the answer the receiving bank gives for [beneficiary]: published as a
+      [Payee_check] event, and returned by every later {!Provider.S.verify_payee} for that
+      beneficiary. *)
+  val simulate_payee_check
+    :  t
+    -> Beneficiary.Id.t
+    -> Beneficiary.Payee_check.t
+    -> unit Or_error.t Deferred.t
+
   (** A [Ping] event. *)
   val ping : t -> unit Or_error.t Deferred.t
 end

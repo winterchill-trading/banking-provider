@@ -117,6 +117,20 @@ module type S = sig
     -> code:Sensitive.t
     -> Sca_challenge.Result.t Or_error.t Deferred.t
 
+  (** {2 Payee checks} *)
+
+  (** Asks the receiving bank whether [beneficiary]'s name matches the account it names
+      (UK Confirmation of Payee, SEPA Verification of Payee), on behalf of [customer]
+      before a payment. Destinations no scheme checks (crypto, Lightning, internal) answer
+      [Not_possible]; a time-out or a scheme outage is [Unavailable], not an error. An
+      error means the request itself failed (unknown customer, provider refusal). A
+      provider may also publish the answer as a [Payee_check] event. *)
+  val verify_payee
+    :  t
+    -> customer:Customer_ref.t
+    -> Beneficiary.t
+    -> Beneficiary.Payee_check.t Or_error.t Deferred.t
+
   (** {2 Swaps} *)
 
   (** Sells [sell] from [from] for the currency of [to_]. *)
