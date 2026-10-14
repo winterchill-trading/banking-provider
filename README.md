@@ -134,6 +134,12 @@ match%bind Fake_provider.initiate_transfer fake ~from:account.id draft >>| ok_ex
   (`Event.to_kyc_event`).
 - **Statements show posted money**: hold placements and releases net out, captures
   appear as the payment.
+- **Payee checks before paying.** `verify_payee ~customer beneficiary` answers `Match`,
+  `Close_match` (with the name the bank holds), `No_match`, `Not_possible`,
+  `Account_not_found` or `Unavailable` (UK Confirmation of Payee, SEPA Verification of
+  Payee); a scheme outage is an answer, not an error.
+- **UK accounts.** GBP accounts may carry `Account.Address.Uk_account` (sort code and
+  account number) instead of an IBAN; `Account.uk_account` reads either.
 
 See [docs/contract.md](docs/contract.md) for what an adapter must normalize and why.
 
@@ -148,14 +154,14 @@ says and the trial balance always holds.
 | Simulated | How |
 | --- | --- |
 | KYC: e-mail and mobile codes, hosted document and liveness, approve, reject, resubmission | `start_verification`, `complete_verification`, `simulate_kyc_decision` |
-| IBAN and deposit addresses (valid DE IBANs, Bech32, EIP-55, Tron, Solana) | `enrich_account`, or `auto_enrich` |
-| SEPA, SCT Inst, on-chain (confirmations later), Lightning and internal deposits | `simulate_deposit` |
-| Payments per rail: SEPA `Pending` then `Settled`, on-chain confirmations, Lightning preimage | settlement mode `Immediate`, `Delayed span` or `Manual` |
+| IBAN, UK details and deposit addresses (valid DE IBANs, sort code 99-00-00 for GBP, Bech32, EIP-55, Tron, Solana) | `enrich_account`, or `auto_enrich` |
+| SEPA, SCT Inst, Faster Payments, CHAPS, Bacs, on-chain (confirmations later), Lightning and internal deposits | `simulate_deposit` |
+| Payments per rail: SEPA, CHAPS and Bacs `Pending` then `Settled`, SCT Inst and Faster Payments `Settled`, on-chain confirmations, Lightning preimage | settlement mode `Immediate`, `Delayed span` or `Manual` |
 | Rejections, SCT Inst timeout and late settlement, returns, recalls, reorgs | `simulate_transfer_outcome` |
 | Insufficient funds (`Failed Insufficient_funds`), SCA lockout (`Failed Sca_failed`) | automatic |
 | Swaps at configured rates and spread, three linked ledger legs | `quote_swap`, `execute_swap` |
 | Card decisions by card-core (`00`, `51`, `57`, `61`, `65`, ...), clearing (partial, above the auth), reversal, refund, stand-in advice, hold expiry | `simulate_card_auth`, `clear_card_auth`, `reverse_card_auth`, `refund_card`, `simulate_card_advice`, `expire_card_auths` |
-| Verification of payee | `simulate_payee_check` |
+| Payee checks: by the account number's last two digits (`96` unavailable, `97` close match, `98` no match, `99` not found, else match), or a fixed answer per beneficiary | `verify_payee`, `simulate_payee_check` |
 | Standing orders, first run under the creation SCA, later runs exempt | `run_standing_orders` |
 | Webhooks: every event kept as a signed delivery for redelivery and reordering | `webhook_deliveries`, `ingest_webhook` |
 
@@ -164,14 +170,24 @@ person beyond accepting it.
 
 ## Conformance
 
-`Conformance.Make (P) (S)` gives eleven scenarios, each awaiting results through
+`Conformance.Make (P) (S)` gives twelve scenarios, each awaiting results through
 events or polling within a timeout, so a sandbox that provisions an IBAN minutes later
-still passes: idempotent customers, KYC approval event, EUR account with IBAN, deposit
-event and balance, SCA-confirmed payment debiting amount plus fee, resend pays once,
-overdraft refused, wrong code refused, unsigned webhook refused, ping event, card
-approved and declined `57` when frozen. The fake passes them in `test/` (immediately,
-and with fees and delayed settlement on the wall clock); an adapter runs the same
-functor against its sandbox behind an environment gate.
+still passes: idempotent customers, KYC approval event, an account with the address
+its rail needs, deposit event and balance, SCA-confirmed payment debiting amount plus
+fee, resend pays once, overdraft refused, wrong code refused, unsigned webhook refused,
+ping event, card approved and declined `57` when frozen, and a payee check that returns
+a simulated answer. The currency and rail come from the config: `Config.default` is EUR
+over SCT Inst, `Config.gbp` GBP over Faster Payments to a UK sort code. The fake passes
+both in `test/` (immediately, and with fees and delayed settlement on the wall clock);
+an adapter runs the same functor against its sandbox behind an environment gate.
+
+## Stable formats
+
+`Event.Stable.V1` (digest pinned in `test/test_event.ml`) is unchanged, and so is the
+unversioned `bin_io` of `Account.t` and `Account.Address.t`. A UK rail, UK account or UK
+transfer details cannot be written in those formats (it raises); persist events with
+`Event.Stable.V2` and accounts with `Account.Stable.V2` wherever GBP can occur. V1 bytes
+read as V2.
 
 ## Storage
 
