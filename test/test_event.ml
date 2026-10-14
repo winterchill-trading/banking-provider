@@ -185,3 +185,73 @@ let%expect_test "Lightning: a payment to an address settles with a preimage" =
       |}];
     return ())
 ;;
+
+let%expect_test "Event.Stable.V2 shape is pinned" =
+  print_endline [%bin_digest: Event.Stable.V2.t];
+  print_endline [%bin_digest: Account.Stable.V2.t];
+  [%expect
+    {|
+    ac2ba69014259cf2f011f9c10ff090dc
+    9e6fff8d90b478d7c7ab070a2af10eea
+    |}];
+  return ()
+;;
+
+(* A GBP deposit names a UK rail, UK details and an account with a sort code: V1 cannot
+   write it and V2 round-trips it. The events before it are EUR-free and V1 still writes
+   them. *)
+let%expect_test "UK events need V2" =
+  with_fake (fun ~clock:_ ~journal:_ fake ->
+    let%bind _customer, account = onboard ~currency:Money.Currency.gbp fake in
+    let%bind (_ : Payments_core.Transfer.Id.t) =
+      ok
+        (Fake_provider.simulate_deposit
+           fake
+           ~account:account.id
+           ~rail:Faster_payments
+           (Money.Amount.of_decimal_string Money.Currency.gbp "1.00" |> ok_exn))
+    in
+    let events = Fake_provider.published fake in
+    let v1_writes e =
+      Result.is_ok
+        (Or_error.try_with (fun () -> Binable.to_string (module Event.Stable.V1) e))
+    in
+    let v2_ok =
+      List.for_all events ~f:(fun e ->
+        let s = Binable.to_string (module Event.Stable.V2) e in
+        Event.equal e (Binable.of_string (module Event.Stable.V2) s))
+    in
+    print_s
+      [%message
+        ""
+          ~kinds:(List.map events ~f:(fun e -> Event.Kind.name e.kind) : string list)
+          ~v1_writes:(List.map events ~f:v1_writes : bool list)
+          (v2_ok : bool)];
+    [%expect
+      {|
+      ((kinds (Kyc Kyc Account_opened Account_updated Incoming_transfer))
+       (v1_writes (true true true false false)) (v2_ok true))
+      |}];
+    return ())
+;;
+
+let%expect_test "EUR events are the same bytes in V1 and V2" =
+  with_fake (fun ~clock:_ ~journal:_ fake ->
+    let%bind _customer, account = onboard fake in
+    let%map (_ : Payments_core.Transfer.Id.t) =
+      ok
+        (Fake_provider.simulate_deposit
+           fake
+           ~account:account.id
+           ~rail:Sepa_credit
+           (eur "1.00"))
+    in
+    let same =
+      List.for_all (Fake_provider.published fake) ~f:(fun e ->
+        let v1 = Binable.to_string (module Event.Stable.V1) e in
+        String.equal v1 (Binable.to_string (module Event.Stable.V2) e)
+        && Event.equal e (Binable.of_string (module Event.Stable.V2) v1))
+    in
+    print_s [%sexp (same : bool)];
+    [%expect {| true |}])
+;;
