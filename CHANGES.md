@@ -25,6 +25,29 @@ All notable changes to this project are documented here. The format follows
 - Crypto addresses on Base, Arbitrum, Plasma and Spark in `Account.Address.Stable.V2`.
 - `Event.Stable.V2`, `Event.Kind.Stable`, `Account.Stable.V1`/`V2` and
   `Account.Address.Stable.V1`/`V2`, with pinned digests.
+- `Account.Address.Local { scheme; fields }` for domestic formats the other variants do
+  not cover (a bank code and account number in Kyrgyzstan, a QR-IBAN next to a Swiss
+  IBAN), `Account.Address.Local_scheme` (`kg`, `ch_qr_iban`), `Account.local`, and
+  `Account.Address.to_display_lines` for every variant.
+- `Account.Address.Stable.V3`, `Account.Stable.V3`, `Event.Kind.Stable.V3` and
+  `Event.Stable.V3`, which can hold `Local` addresses, with pinned digests.
+- `Fake_details`: deterministic bank details from a key, per market: EU IBANs with valid
+  check digits, a GB sort code and account number that pass the modulus check, a US
+  account at a routing number with a valid check digit, a KG bank code and account
+  number, a CH IBAN with its QR-IBAN.
+- Fake provider: account details and crypto addresses derive from the open-account
+  idempotency key (our customer id and the currency, or the key given to the new
+  `open_account_with_key`), so a restarted fake gives a customer the same IBAN; a new
+  key opens a further account in the same currency. CHF and KGS accounts.
+- `Sandbox.S.set_kyc_simulation` and `set_deposit_simulation` (with `Kyc_outcome`,
+  `Kyc_simulation`, `Deposit_outcome`, `Deposit_simulation`): KYC decided as approved,
+  pending review or rejected a delay after the last hosted step, deposits delayed or
+  bounced, each with a default and per-customer overrides. `Sandbox.unsupported` and
+  `Sandbox.is_unsupported` for sandboxes without such controls. The fake implements both
+  and reports the settings in force (`kyc_simulation`, `deposit_simulation`).
+- Conformance: `Config.kyc_delay` (200 ms) and two scenarios, an account keeps its details
+  when opened and enriched again, and a KYC decision set to wait arrives after its delay
+  (skipped by a sandbox that answers `unsupported`).
 
 ### Compatibility
 
@@ -34,4 +57,10 @@ All notable changes to this project are documented here. The format follows
   `Account.Address` and `Event.Kind` keeps its format. Writing UK or US rails, accounts or
   details, or newer-network addresses, in those formats raises; use V2.
 - Every `Provider.S` and `Sandbox.S` implementation must add `verify_payee` and
-  `simulate_payee_check`.
+  `simulate_payee_check`, and every `Sandbox.S` implementation `set_kyc_simulation` and
+  `set_deposit_simulation` (`Sandbox.unsupported` is a valid answer).
+- `Account.Address.Stable.V2`, `Account.Stable.V2` and `Event.Stable.V2` keep their
+  digests; writing a `Local` address in them raises, so persist with V3 where one can
+  occur. V2 bytes read as V3. A match on `Account.Address.t` needs a `Local` case.
+- The fake's IBANs, UK and US account numbers and crypto addresses change: they no
+  longer follow the account counter. Expect tests that pin them need re-promoting.
