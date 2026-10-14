@@ -132,7 +132,6 @@ module Kind : sig
             ; transfer : Transfer.Id.Stable.V1.t
             }
         | Ping
-
       [@@deriving bin_io, sexp, compare, equal]
     end
   end

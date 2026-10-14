@@ -27,12 +27,14 @@
 
     {b Currencies.} EUR accounts get a German IBAN and GBP accounts a UK sort code
     ([99-00-00], which no bank uses) and account number; crypto accounts get an address on
-    their network. GBP moves on Faster Payments (settles at once), CHAPS and Bacs (pending,
-    then settled).
+    their network. GBP moves on Faster Payments (settles at once), CHAPS and Bacs
+    (pending, then settled).
 
     {b Payee checks.} {!verify_payee} answers what {!simulate_payee_check} last fixed for
     the beneficiary; otherwise it goes by the last two characters of the account number or
-    IBAN: [96] [Unavailable], [97] [Close_match] (the name with initials), [98] [No_match],
+    IBAN: [96] [Unavailable], [97] [Close_match] (the name with initials), [98]
+    [No_match],
+
     [99] [Account_not_found], anything else [Match]. Crypto, Lightning and internal
     destinations are [Not_possible]. *)
 

@@ -1759,7 +1759,9 @@ let simulate_payee_check t beneficiary result =
 
 (* "Ada Lovelace Example" -> "A L Example": what a bank's record often holds instead. *)
 let initials_form name =
-  match List.rev (String.split name ~on:' ' |> List.filter ~f:(Fn.non String.is_empty)) with
+  match
+    List.rev (String.split name ~on:' ' |> List.filter ~f:(Fn.non String.is_empty))
+  with
   | [] | [ _ ] -> String.uppercase name
   | last :: rest ->
     List.rev_map rest ~f:(fun w -> String.prefix w 1 |> String.uppercase) @ [ last ]
@@ -1773,8 +1775,8 @@ let verify_payee t ~customer (beneficiary : Beneficiary.t) =
      match Hashtbl.find t.payee_checks beneficiary.id with
      | Some result -> result
      | None ->
-       (* Deterministic answers by the account number's last two characters, so tests
-          can reach every outcome; anything else matches. *)
+       (* Deterministic answers by the account number's last two characters, so tests can
+          reach every outcome; anything else matches. *)
        let by_suffix number : Beneficiary.Payee_check.t =
          match String.suffix number 2 with
          | "96" -> Unavailable
