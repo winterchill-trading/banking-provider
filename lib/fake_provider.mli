@@ -63,10 +63,17 @@ val sandbox_code : string
     journal that already has them is fine). [time_source] should be the journal's. *)
 val create
   :  ?config:Config.t
+  -> ?counters:(string * int) list
   -> time_source:[> read ] Time_source.T1.t
   -> journal:Ledger.Journal.t
   -> unit
   -> t Or_error.t
+
+(** The id counters by prefix ([cus], [acc], [evt], [card], ...), sorted. Ids come from
+    them, so a service that keeps the journal across restarts saves them and passes them
+    back to {!create} as [counters]; otherwise a restarted fake hands out [cus_000001]
+    again. *)
+val counters : t -> (string * int) list
 
 include Provider.S with type t := t
 include Sandbox.S with type t := t

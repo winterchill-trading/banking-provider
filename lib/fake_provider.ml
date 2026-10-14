@@ -146,7 +146,11 @@ let next_id t prefix =
 let digest label = Cryptokit.hash_string (Cryptokit.Hash.sha256 ()) label
 let hex s = Cryptokit.transform_string (Cryptokit.Hexa.encode ()) s
 
-let create ?(config = Config.default) ~time_source ~journal () =
+let counters t =
+  Hashtbl.to_alist t.counters |> List.sort ~compare:[%compare: string * int]
+;;
+
+let create ?(config = Config.default) ?(counters = []) ~time_source ~journal () =
   let open Or_error.Let_syntax in
   let chart = Booking.Chart.default in
   let card_chart = Card_core.Booking.Chart.default in
@@ -165,7 +169,12 @@ let create ?(config = Config.default) ~time_source ~journal () =
   ; journal
   ; chart
   ; card_chart
-  ; counters = String.Table.create ()
+  ; counters =
+      (let table = String.Table.create () in
+       List.iter counters ~f:(fun (prefix, n) ->
+         Hashtbl.update table prefix ~f:(fun old ->
+           Int.max n (Option.value old ~default:0)));
+       table)
   ; customers = Customer_ref.Table.create ()
   ; customers_by_id = Kyc_core.Customer_id.Table.create ()
   ; accounts = Account_ref.Table.create ()
