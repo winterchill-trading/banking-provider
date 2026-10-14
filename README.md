@@ -138,8 +138,10 @@ match%bind Fake_provider.initiate_transfer fake ~from:account.id draft >>| ok_ex
   `Close_match` (with the name the bank holds), `No_match`, `Not_possible`,
   `Account_not_found` or `Unavailable` (UK Confirmation of Payee, SEPA Verification of
   Payee); a scheme outage is an answer, not an error.
-- **UK accounts.** GBP accounts may carry `Account.Address.Uk_account` (sort code and
-  account number) instead of an IBAN; `Account.uk_account` reads either.
+- **UK and US accounts.** GBP accounts may carry `Account.Address.Uk_account` (sort code
+  and account number) instead of an IBAN, read by `Account.uk_account` (which also reads a
+  GB IBAN); USD accounts carry `Us_account` (routing and account number, type), read by
+  `Account.us_account`.
 
 See [docs/contract.md](docs/contract.md) for what an adapter must normalize and why.
 
@@ -154,9 +156,9 @@ says and the trial balance always holds.
 | Simulated | How |
 | --- | --- |
 | KYC: e-mail and mobile codes, hosted document and liveness, approve, reject, resubmission | `start_verification`, `complete_verification`, `simulate_kyc_decision` |
-| IBAN, UK details and deposit addresses (valid DE IBANs, sort code 99-00-00 for GBP, Bech32, EIP-55, Tron, Solana) | `enrich_account`, or `auto_enrich` |
-| SEPA, SCT Inst, Faster Payments, CHAPS, Bacs, on-chain (confirmations later), Lightning and internal deposits | `simulate_deposit` |
-| Payments per rail: SEPA, CHAPS and Bacs `Pending` then `Settled`, SCT Inst and Faster Payments `Settled`, on-chain confirmations, Lightning preimage | settlement mode `Immediate`, `Delayed span` or `Manual` |
+| IBAN, UK and US details and deposit addresses (valid DE IBANs, sort code 99-00-00 for GBP, routing number 123456780 for USD, Bech32, EIP-55, Tron, Solana, Spark) | `enrich_account`, or `auto_enrich` |
+| SEPA, SCT Inst, Faster Payments, CHAPS, Bacs, ACH, RTP, Fedwire, on-chain (confirmations later), Lightning and internal deposits | `simulate_deposit` |
+| Payments per rail: SEPA, CHAPS, Bacs and ACH `Pending` then `Settled`, SCT Inst, Faster Payments, RTP and Fedwire `Settled`, on-chain confirmations, Lightning preimage | settlement mode `Immediate`, `Delayed span` or `Manual` |
 | Rejections, SCT Inst timeout and late settlement, returns, recalls, reorgs | `simulate_transfer_outcome` |
 | Insufficient funds (`Failed Insufficient_funds`), SCA lockout (`Failed Sca_failed`) | automatic |
 | Swaps at configured rates and spread, three linked ledger legs | `quote_swap`, `execute_swap` |
@@ -177,16 +179,17 @@ its rail needs, deposit event and balance, SCA-confirmed payment debiting amount
 fee, resend pays once, overdraft refused, wrong code refused, unsigned webhook refused,
 ping event, card approved and declined `57` when frozen, and a payee check that returns
 a simulated answer. The currency and rail come from the config: `Config.default` is EUR
-over SCT Inst, `Config.gbp` GBP over Faster Payments to a UK sort code. The fake passes
-both in `test/` (immediately, and with fees and delayed settlement on the wall clock);
+over SCT Inst, `Config.gbp` GBP over Faster Payments to a UK sort code, `Config.usd` USD over ACH to
+a US checking account. The fake passes all three in `test/` (immediately, and with fees and delayed settlement on the wall clock);
 an adapter runs the same functor against its sandbox behind an environment gate.
 
 ## Stable formats
 
 `Event.Stable.V1` (digest pinned in `test/test_event.ml`) is unchanged, and so is the
-unversioned `bin_io` of `Account.t` and `Account.Address.t`. A UK rail, UK account or UK
-transfer details cannot be written in those formats (it raises); persist events with
-`Event.Stable.V2` and accounts with `Account.Stable.V2` wherever GBP can occur. V1 bytes
+unversioned `bin_io` of `Account.t` and `Account.Address.t`. UK or US rails, accounts or
+transfer details, and addresses on the newer networks (Base, Arbitrum, Plasma, Spark),
+cannot be written in those formats (it raises); persist events with `Event.Stable.V2`
+and accounts with `Account.Stable.V2` wherever GBP, USD or those networks can occur. V1 bytes
 read as V2.
 
 ## Storage
