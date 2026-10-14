@@ -147,6 +147,11 @@ module Address = struct
 
   include (Stable.V1 : Binable.S with type t := t)
 
+  module Local_scheme = struct
+    let kg = "kg"
+    let ch_qr_iban = "ch_qr_iban"
+  end
+
   (* Field names are lower snake case ([bank_code]); a few are acronyms people expect in
      capitals. *)
   let label_of_field = function

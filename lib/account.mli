@@ -57,6 +57,17 @@ module Address : sig
     end
   end
 
+  (** The [scheme] names of the [Local] formats this library knows. An adapter may use
+      others; these keep the common ones spelled one way. *)
+  module Local_scheme : sig
+    (** Kyrgyzstan: fields [bank_code] (six digits) and [account_number] (sixteen). *)
+    val kg : string
+
+    (** Switzerland: field [qr_iban], the QR-IBAN that QR-bills name next to the account's
+        ordinary IBAN. *)
+    val ch_qr_iban : string
+  end
+
   (** The details as a customer reads them, one line each: [IBAN DE89 3704 ...] and
       [BIC ...]; [Sort code 99-00-00] and [Account number ...]; [Routing number ...],
       [Account number ...] and the account type; the network and address of a crypto
