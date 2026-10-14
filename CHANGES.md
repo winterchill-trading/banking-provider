@@ -48,6 +48,13 @@ All notable changes to this project are documented here. The format follows
 - Conformance: `Config.kyc_delay` (200 ms) and two scenarios, an account keeps its details
   when opened and enriched again, and a KYC decision set to wait arrives after its delay
   (skipped by a sandbox that answers `unsupported`).
+- `Payee_check_result` (a payee check answer plus the receiving account's currency, when
+  known; `Stable.V1`) and the optional `Provider.Payee_details` capability
+  (`verify_payee_details`), with `Provider.Payee_details_of_verify` to offer it over any
+  `Provider.S` with no currency. `Provider.S` itself is unchanged. The fake implements it
+  (a fixed currency from `simulate_payee_account_currency`, else the currency of an
+  account it holds, else GBP or USD for UK and US domestic details).
+- The fake's payee check treats a local destination as `Not_possible`.
 
 ### Compatibility
 
