@@ -10,7 +10,7 @@ this page explains the choices.
 | --- | --- | --- |
 | Customers | `create_customer`, `update_customer`, `kyc_status` | Send our `Kyc_core.Customer_id.t` as the provider's external id and look it up before creating, so a resend returns the same customer. |
 | Verification | `start_verification`, `complete_verification` | E-mail and mobile are codes (`Code_sent`); document and liveness are the provider's hosted flow (`Hosted` with a `Sensitive.t` token); their result arrives as `Kyc` events. |
-| Accounts | `open_account`, `accounts`, `balance`, `enrich_account`, `statement` | One account per customer and currency; `enrich_account` is idempotent and may return no address yet (some providers provision IBANs minutes after approval). A UK account's address is `Uk_account` (sort code and account number); give a GB IBAN too if the provider has one. A US account's is `Us_account` (routing number, account number, checking or savings). Balances are on the customer's side: available, held, posted. |
+| Accounts | `open_account`, `accounts`, `balance`, `enrich_account`, `statement` | One account per customer and currency; `enrich_account` is idempotent and may return no address yet (some providers provision IBANs minutes after approval). A UK account's address is `Uk_account` (sort code and account number); give a GB IBAN too if the provider has one. A US account's is `Us_account` (routing number, account number, checking or savings). Details in a domestic format the other variants do not cover go in `Local { scheme; fields }`: Kyrgyz accounts as `kg` (`bank_code`, `account_number`), a Swiss QR-IBAN as `ch_qr_iban` (`qr_iban`) next to the account's `Iban`. The same account must keep the same details on every call. Balances are on the customer's side: available, held, posted. |
 | Transfers | `quote_fee`, `initiate_transfer`, `transfer`, `cancel_transfer` | The draft's `Transfer.Id.t` is the provider idempotency key. The draft's `account` names our ledger account and is not sent. GBP payments are drafted on `Faster_payments`, `Chaps` or `Bacs` with `Uk_domestic` details; put the scheme's payment id in `scheme_ref` when it is known. USD payments go on `Ach { sec; same_day }`, `Rtp` or `Fedwire` with `Us_domestic` details (ACH trace number, RTP message id or Fedwire IMAD in `scheme_ref`). |
 | Payee checks | `verify_payee` | Confirmation of Payee (UK) or Verification of Payee (SEPA) for a beneficiary, on behalf of the paying customer. Map the scheme's answers to `Match`, `Close_match` (with the name the bank holds), `No_match`, `Not_possible` (the bank cannot check this account), `Account_not_found` and `Unavailable` (time-out, outage: retryable). Return an error only when the request itself failed. Destinations no scheme checks answer `Not_possible`. |
 | SCA | `confirm_sca` | One call for every challenge; the challenge's `purpose` says what resumes. |
@@ -19,6 +19,7 @@ this page explains the choices.
 | Standing orders | `create_standing_order`, `cancel_standing_order` | Confirmed once by SCA; each run is a `Standing_order_run` event followed by the transfer's events. |
 | Events | `events`, `ingest_webhook` | See below. |
 | Sandbox | `simulate_deposit`, `simulate_kyc_decision`, `simulate_card_auth`, `simulate_transfer_outcome`, `simulate_payee_check`, `ping` | Map to the provider's simulator endpoints where they exist. `simulate_payee_check` fixes the answer for one beneficiary: publish it as a `Payee_check` event and return it from later `verify_payee` calls for that beneficiary (a provider whose simulator sets the next answer only can keep it per beneficiary in the adapter). |
+| Simulation settings | `set_kyc_simulation`, `set_deposit_simulation` | How the sandbox answers on its own: KYC decided (`Approved`, `Pending_review`, `Rejected reason`) a delay after the last hosted step starts, deposits reported pending and settled or bounced a delay later; a default plus per-customer overrides. A provider without such switches answers `Sandbox.unsupported ~operation`; the conformance scenario for delayed KYC then checks nothing. |
 
 ## Events
 
@@ -54,7 +55,9 @@ this page explains the choices.
 - **Persisting events.** `Event.Stable.V1` cannot hold UK or US rails, accounts or details,
   or addresses on the newer networks
   (writing raises) and writes the newer payee check answers as `Not_possible`; an inbox
-  or journal that may see GBP must use `Event.Stable.V2`.
+  or journal that may see GBP must use `Event.Stable.V2`. `Event.Stable.V2` cannot hold
+  an account with a `Local` address; use `Event.Stable.V3` where one can occur (V2 bytes
+  read as V3).
 - **No personal data.** KYC events carry steps and status transitions only.
 
 ## Lessons from the fake
@@ -74,6 +77,15 @@ this page explains the choices.
   net to zero.
 - **Fees.** The provider's fee replaces the draft's: `initiate_transfer` books the fee
   the provider charges, and `quote_fee` gives it beforehand.
+- **Details from the idempotency key.** The fake derives an account's IBAN, sort code,
+  account numbers and deposit address from the key it opened the account with (our
+  customer id and the currency by default), never from its own counters, so a restart
+  with an empty memory gives the customer the same details. A provider does this by
+  keeping the account; an adapter must look the account up by the key before opening.
+- **Simulated timing runs on the injected clock.** Delayed KYC decisions and deposits
+  are timers on the time source, independent of the settlement mode; a test advances a
+  synthetic clock to see them, and the conformance suite (which waits on the wall clock)
+  moves that clock along when it runs against the fake.
 - **Overdrafts.** A payment whose hold fails is `Failed Insufficient_funds`, published
   under the event id the `Submitted` report would have had, so ids stay consecutive.
 
@@ -108,6 +120,10 @@ no longer fail on the currency:
 let config = { (Conformance.Config.gbp ~run_id) with payee = Some "04-00-04 12345678" } in
 Suite.run_all config provider
 ```
+
+Two scenarios check the sandbox's own behaviour: an account opened and enriched again
+keeps the same id and details, and a KYC approval set with `set_kyc_simulation` to wait
+`kyc_delay` (200 ms by default) is not there at once and arrives within `timeout`.
 
 The account scenario keeps its original name for EUR over SEPA and is named after the
 currency and the address otherwise.
