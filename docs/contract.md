@@ -10,8 +10,8 @@ this page explains the choices.
 | --- | --- | --- |
 | Customers | `create_customer`, `update_customer`, `kyc_status` | Send our `Kyc_core.Customer_id.t` as the provider's external id and look it up before creating, so a resend returns the same customer. |
 | Verification | `start_verification`, `complete_verification` | E-mail and mobile are codes (`Code_sent`); document and liveness are the provider's hosted flow (`Hosted` with a `Sensitive.t` token); their result arrives as `Kyc` events. |
-| Accounts | `open_account`, `accounts`, `balance`, `enrich_account`, `statement` | One account per customer and currency; `enrich_account` is idempotent and may return no address yet (some providers provision IBANs minutes after approval). A UK account's address is `Uk_account` (sort code and account number); give a GB IBAN too if the provider has one. Balances are on the customer's side: available, held, posted. |
-| Transfers | `quote_fee`, `initiate_transfer`, `transfer`, `cancel_transfer` | The draft's `Transfer.Id.t` is the provider idempotency key. The draft's `account` names our ledger account and is not sent. GBP payments are drafted on `Faster_payments`, `Chaps` or `Bacs` with `Uk_domestic` details; put the scheme's payment id in `scheme_ref` when it is known. |
+| Accounts | `open_account`, `accounts`, `balance`, `enrich_account`, `statement` | One account per customer and currency; `enrich_account` is idempotent and may return no address yet (some providers provision IBANs minutes after approval). A UK account's address is `Uk_account` (sort code and account number); give a GB IBAN too if the provider has one. A US account's is `Us_account` (routing number, account number, checking or savings). Balances are on the customer's side: available, held, posted. |
+| Transfers | `quote_fee`, `initiate_transfer`, `transfer`, `cancel_transfer` | The draft's `Transfer.Id.t` is the provider idempotency key. The draft's `account` names our ledger account and is not sent. GBP payments are drafted on `Faster_payments`, `Chaps` or `Bacs` with `Uk_domestic` details; put the scheme's payment id in `scheme_ref` when it is known. USD payments go on `Ach { sec; same_day }`, `Rtp` or `Fedwire` with `Us_domestic` details (ACH trace number, RTP message id or Fedwire IMAD in `scheme_ref`). |
 | Payee checks | `verify_payee` | Confirmation of Payee (UK) or Verification of Payee (SEPA) for a beneficiary, on behalf of the paying customer. Map the scheme's answers to `Match`, `Close_match` (with the name the bank holds), `No_match`, `Not_possible` (the bank cannot check this account), `Account_not_found` and `Unavailable` (time-out, outage: retryable). Return an error only when the request itself failed. Destinations no scheme checks answer `Not_possible`. |
 | SCA | `confirm_sca` | One call for every challenge; the challenge's `purpose` says what resumes. |
 | Swaps | `quote_swap`, `execute_swap` | The outcome is an event (`Swap_executed`, `Swap_failed`). |
@@ -48,7 +48,11 @@ this page explains the choices.
   (`Submitted`, `Pending`, `Settled`, `Rejected`, `Returned`); give rejects and returns a
   four-character ISO reason where the scheme has one. Deposits carry the rail, GBP and
   `Uk_domestic` details.
-- **Persisting events.** `Event.Stable.V1` cannot hold UK rails, accounts or details
+- **US payments.** ACH, RTP and Fedwire statuses map to the same direct updates; ACH
+  returns carry the R-code's four-character reason as reported. RTP and Fedwire payments
+  cannot be returned (payments-core refuses the transition).
+- **Persisting events.** `Event.Stable.V1` cannot hold UK or US rails, accounts or details,
+  or addresses on the newer networks
   (writing raises) and writes the newer payee check answers as `Not_possible`; an inbox
   or journal that may see GBP must use `Event.Stable.V2`.
 - **No personal data.** KYC events carry steps and status transitions only.
@@ -94,7 +98,9 @@ provisioning.
 The suite runs in the config's currency over its rail. `Config.default` is EUR over SCT
 Inst (accounts must show an IBAN); `Config.gbp ~run_id` is GBP over Faster Payments
 (accounts must show a sort code and account number, or a GB IBAN), with a UK resident
-and the payee `99-00-00 87654321`. Set `payee` to a destination the sandbox accepts for
+and the payee `99-00-00 87654321`; `Config.usd ~run_id` is USD over standard ACH (PPD;
+accounts must show a routing and account number), with a US resident and the payee
+`123456780 000987654 checking`. Set `payee` to a destination the sandbox accepts for
 the rail. A provider that holds only GBP runs `Config.gbp`, so the EUR-only scenarios
 no longer fail on the currency:
 
