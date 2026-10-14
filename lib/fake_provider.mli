@@ -36,6 +36,12 @@
     Faster Payments (settled at once), CHAPS and Bacs (pending, then settled); USD on RTP
     and Fedwire (settled at once) and ACH (pending, then settled).
 
+    {b Simulation settings.} {!set_kyc_simulation} makes KYC decide itself a delay after
+    the last hosted step starts, and {!set_deposit_simulation} delays or bounces deposits;
+    both run on the time source, whatever [settlement] says, and a zero delay acts at
+    once. Unset, KYC waits for {!simulate_kyc_decision} and deposits land at once, as
+    before these settings existed.
+
     {b Payee checks.} {!verify_payee} answers what {!simulate_payee_check} last fixed for
     the beneficiary. Otherwise it goes by the last two characters of the account number or
     IBAN: [96] is [Unavailable], [97] [Close_match] (the name with initials), [98]
@@ -161,6 +167,18 @@ val simulate_payee_check
   -> Beneficiary.Id.t
   -> Beneficiary.Payee_check.t
   -> unit Or_error.t Deferred.t
+
+(** The KYC simulation in force for [customer] (its override, else the default set by
+    {!set_kyc_simulation}); without [customer], the default. Starts as [Manual]. *)
+val kyc_simulation : t -> ?customer:Customer_ref.t -> unit -> Sandbox.Kyc_simulation.t
+
+(** The deposit simulation in force for [customer], as {!kyc_simulation}. Starts as
+    {!Sandbox.Deposit_simulation.default}. *)
+val deposit_simulation
+  :  t
+  -> ?customer:Customer_ref.t
+  -> unit
+  -> Sandbox.Deposit_simulation.t
 
 (** Every event so far as a signed delivery, in publish order. *)
 val webhook_deliveries : t -> Webhook.Request.t list

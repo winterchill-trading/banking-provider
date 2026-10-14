@@ -132,6 +132,12 @@ type t =
   ; auths : auth Ids.Auth_id.Table.t
   ; orders : order_state Standing_order_ref.Table.t
   ; payee_checks : Beneficiary.Payee_check.t Beneficiary.Id.Table.t
+  ; mutable kyc_simulation : Sandbox.Kyc_simulation.t
+  ; kyc_overrides : Sandbox.Kyc_simulation.t Customer_ref.Table.t
+  ; kyc_rounds : int Customer_ref.Table.t
+  (** bumped by each hosted step start; only the latest scheduled decision runs *)
+  ; mutable deposit_simulation : Sandbox.Deposit_simulation.t
+  ; deposit_overrides : Sandbox.Deposit_simulation.t Customer_ref.Table.t
   ; mutable subscribers : Event.t Pipe.Writer.t list
   ; published : Event.t Queue.t
   ; deliveries : Webhook.Request.t Queue.t
@@ -198,6 +204,11 @@ let create ?(config = Config.default) ?(counters = []) ~time_source ~journal () 
   ; auths = Ids.Auth_id.Table.create ()
   ; orders = Standing_order_ref.Table.create ()
   ; payee_checks = Beneficiary.Id.Table.create ()
+  ; kyc_simulation = Manual
+  ; kyc_overrides = Customer_ref.Table.create ()
+  ; kyc_rounds = Customer_ref.Table.create ()
+  ; deposit_simulation = Sandbox.Deposit_simulation.default
+  ; deposit_overrides = Customer_ref.Table.create ()
   ; subscribers = []
   ; published = Queue.create ()
   ; deliveries = Queue.create ()
@@ -268,6 +279,28 @@ let later t f =
   | Immediate -> run ()
   | Delayed span -> Time_source.run_after t.time_source span run ()
   | Manual -> ()
+;;
+
+(* Simulated timing: unlike [later], independent of the settlement setting. *)
+let after t span f =
+  let run () =
+    match f () with
+    | Ok () -> ()
+    | Error e -> Queue.enqueue t.background_errors e
+  in
+  if Time_ns.Span.( <= ) span Time_ns.Span.zero
+  then run ()
+  else Time_source.run_after t.time_source span run ()
+;;
+
+let kyc_simulation t ?customer () =
+  Option.bind customer ~f:(Hashtbl.find t.kyc_overrides)
+  |> Option.value ~default:t.kyc_simulation
+;;
+
+let deposit_simulation t ?customer () =
+  Option.bind customer ~f:(Hashtbl.find t.deposit_overrides)
+  |> Option.value ~default:t.deposit_simulation
 ;;
 
 (* {2 Lookups} *)
@@ -359,11 +392,91 @@ let is_code_step : Kyc_core.Verification.Step.t -> bool = function
   | Identity_document | Liveness | Address_proof | Source_of_funds -> false
 ;;
 
+let hosted_sent (c : customer_state) =
+  List.filter_map c.kyc.steps ~f:(fun (step, state) ->
+    match state with
+    | Sent when not (is_code_step step) -> Some step
+    | _ -> None)
+;;
+
+let submit_if_needed t (c : customer_state) =
+  match c.kyc.status with
+  | Created | Needs_resubmission _ -> set_status t c Submit
+  | _ -> Ok ()
+;;
+
+let decide t (c : customer_state) (decision : Sandbox.Kyc_decision.t) =
+  let open Or_error.Let_syntax in
+  let sent = hosted_sent c in
+  let%bind () =
+    match decision with
+    | Approve ->
+      List.map sent ~f:(fun step -> set_step t c step (Verified (now t)))
+      |> Or_error.all_unit
+    | Reject reason ->
+      List.map sent ~f:(fun step -> set_step t c step (Failed reason))
+      |> Or_error.all_unit
+    | Request_resubmission _ -> Ok ()
+  in
+  let%bind () = submit_if_needed t c in
+  match decision with
+  | Approve -> set_status t c Approve
+  | Reject reason -> set_status t c (Reject reason)
+  | Request_resubmission fields -> set_status t c (Request_resubmission fields)
+;;
+
+let simulate_kyc_decision t id (decision : Sandbox.Kyc_decision.t) =
+  return (Or_error.bind (customer_state t id) ~f:(fun c -> decide t c decision))
+;;
+
+(* An automatic decision decides an open case only: one already approved, rejected,
+   blocked or closed (by hand in the meantime, say) is left alone. *)
+let auto_decide t (c : customer_state) (outcome : Sandbox.Kyc_outcome.t) =
+  let open Or_error.Let_syntax in
+  match c.kyc.status with
+  | Approved | Rejected _ | Blocked _ | Closed _ -> Ok ()
+  | Created | Verifying | Needs_resubmission _ ->
+    (match outcome with
+     | Approved -> decide t c Approve
+     | Rejected reason -> decide t c (Reject reason)
+     | Pending_review ->
+       let%bind () =
+         List.map (hosted_sent c) ~f:(fun step -> set_step t c step (Verified (now t)))
+         |> Or_error.all_unit
+       in
+       submit_if_needed t c)
+;;
+
+let schedule_kyc_decision t (c : customer_state) =
+  let id = c.customer.id in
+  match kyc_simulation t ~customer:id () with
+  | Manual -> ()
+  | Decide { outcome; delay } ->
+    let round = 1 + Option.value (Hashtbl.find t.kyc_rounds id) ~default:0 in
+    Hashtbl.set t.kyc_rounds ~key:id ~data:round;
+    after t delay (fun () ->
+      if Option.equal Int.equal (Hashtbl.find t.kyc_rounds id) (Some round)
+      then auto_decide t c outcome
+      else Ok ())
+;;
+
+let set_kyc_simulation t ?customer setting =
+  return
+    (match customer with
+     | None ->
+       t.kyc_simulation <- setting;
+       Ok ()
+     | Some id ->
+       Or_error.map (customer_state t id) ~f:(fun _ ->
+         Hashtbl.set t.kyc_overrides ~key:id ~data:setting))
+;;
+
 let start_verification t id step =
   return
     (let open Or_error.Let_syntax in
      let%bind c = customer_state t id in
      let%map () = set_step t c step Sent in
+     if not (is_code_step step) then schedule_kyc_decision t c;
      let expires_at = Time_ns.add (now t) (Time_ns.Span.of_min 10.) in
      if is_code_step step
      then Customer.Verification_session.Code_sent { step; expires_at }
@@ -391,37 +504,6 @@ let complete_verification t id step ~code =
      in
      let%map () = set_step t c step state in
      state)
-;;
-
-let simulate_kyc_decision t id (decision : Sandbox.Kyc_decision.t) =
-  return
-    (let open Or_error.Let_syntax in
-     let%bind c = customer_state t id in
-     let sent =
-       List.filter_map c.kyc.steps ~f:(fun (step, state) ->
-         match state with
-         | Sent when not (is_code_step step) -> Some step
-         | _ -> None)
-     in
-     let%bind () =
-       match decision with
-       | Approve ->
-         List.map sent ~f:(fun step -> set_step t c step (Verified (now t)))
-         |> Or_error.all_unit
-       | Reject reason ->
-         List.map sent ~f:(fun step -> set_step t c step (Failed reason))
-         |> Or_error.all_unit
-       | Request_resubmission _ -> Ok ()
-     in
-     let%bind () =
-       match c.kyc.status with
-       | Created | Needs_resubmission _ -> set_status t c Submit
-       | _ -> Ok ()
-     in
-     match decision with
-     | Approve -> set_status t c Approve
-     | Reject reason -> set_status t c (Reject reason)
-     | Request_resubmission fields -> set_status t c (Request_resubmission fields))
 ;;
 
 (* {2 Accounts} *)
@@ -1061,6 +1143,28 @@ let deposit_details t (a : account_state) ~rail ~provider_ref
     Or_error.error_string "card refunds come from refund_card, not a deposit"
 ;;
 
+let set_deposit_simulation t ?customer setting =
+  return
+    (match customer with
+     | None ->
+       t.deposit_simulation <- setting;
+       Ok ()
+     | Some id ->
+       Or_error.map (customer_state t id) ~f:(fun _ ->
+         Hashtbl.set t.deposit_overrides ~key:id ~data:setting))
+;;
+
+(* On-chain progress that satisfies any confirmation policy: six blocks and finalized. *)
+let confirmed ~provider_ref : Transfer_update.t =
+  let tx = digest ("fake-tx:" ^ provider_ref) in
+  Confirmations
+    { tx_hash = hex tx
+    ; block_hash = hex (digest tx)
+    ; confirmations = 6
+    ; finalized = true
+    }
+;;
+
 let simulate_deposit t ~account ~rail amount =
   return
     (let open Or_error.Let_syntax in
@@ -1070,8 +1174,15 @@ let simulate_deposit t ~account ~rail amount =
        then Ok ()
        else Or_error.error_string "amount is not in the account's currency"
      in
+     let simulation = deposit_simulation t ~customer:a.account.customer () in
+     let simulated =
+       not
+         (Sandbox.Deposit_simulation.equal simulation Sandbox.Deposit_simulation.default)
+     in
      let provider_ref = next_id t "dep" in
      let%bind details, from, settled = deposit_details t a ~rail ~provider_ref in
+     (* A delayed or bounced deposit is reported pending first, whatever the rail. *)
+     let settled = settled && not simulated in
      let id = Event.incoming_transfer_id ~provider_ref in
      let event =
        new_event
@@ -1104,20 +1215,15 @@ let simulate_deposit t ~account ~rail amount =
      let s = { transfer; updated_at = now t } in
      Hashtbl.set t.transfers ~key:id ~data:s;
      publish t event;
-     if not settled
-     then (
-       let tx = digest ("fake-tx:" ^ provider_ref) in
-       later t (fun () ->
-         (* Enough for any confirmation policy: six blocks and finalized. *)
-         apply_update
-           t
-           s
-           (Confirmations
-              { tx_hash = hex tx
-              ; block_hash = hex (digest tx)
-              ; confirmations = 6
-              ; finalized = true
-              })));
+     if simulated
+     then
+       after t simulation.delay (fun () ->
+         match simulation.outcome, rail with
+         | Bounce reason, _ -> apply_update t s (Rejected reason)
+         | Credit, Onchain _ -> apply_update t s (confirmed ~provider_ref)
+         | Credit, _ -> apply_update t s Settled)
+     else if not settled
+     then later t (fun () -> apply_update t s (confirmed ~provider_ref));
      id)
 ;;
 
