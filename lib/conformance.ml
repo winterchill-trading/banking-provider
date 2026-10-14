@@ -59,6 +59,26 @@ module Config = struct
     }
   ;;
 
+  let usd s = Money.Amount.of_decimal_string Money.Currency.usd s |> Or_error.ok_exn
+
+  let synthetic_us_person =
+    let open Kyc_core in
+    { synthetic_person with
+      nationality = Pii.create (Country.of_string "US")
+    ; residential_address =
+        Pii.create
+          { Address.line1 = "1 Test Street"
+          ; line2 = None
+          ; city = "Springfield"
+          ; region = Some "IL"
+          ; postal_code = Some "62701"
+          ; country = Country.of_string "US"
+          }
+    ; (* 555-0100 to 555-0199 are reserved for fiction. *)
+      mobile = Pii.create "+12175550100"
+    }
+  ;;
+
   let default ~run_id =
     { run_id
     ; person = synthetic_person
@@ -84,6 +104,18 @@ module Config = struct
     ; rail = Faster_payments
     ; (* A sort code no bank uses, so a sandbox cannot reach a real account. *)
       payee = Some "99-00-00 87654321"
+    }
+  ;;
+
+  let usd ~run_id =
+    { (default ~run_id) with
+      person = synthetic_us_person
+    ; deposit = usd "100.00"
+    ; payment = usd "30.00"
+    ; currency = Money.Currency.usd
+    ; rail = Ach { sec = Ppd; same_day = false }
+    ; (* A routing number with a valid check digit, not looked up anywhere. *)
+      payee = Some "123456780 000987654 checking"
     }
   ;;
 
@@ -163,6 +195,8 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
     then "an IBAN"
     else if Rail.is_uk config.rail
     then "a sort code and account number"
+    else if Rail.is_us config.rail
+    then "a routing and account number"
     else "an address"
   ;;
 
@@ -171,6 +205,8 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
     then Option.is_some (Account.iban account)
     else if Rail.is_uk config.rail
     then Option.is_some (Account.uk_account account)
+    else if Rail.is_us config.rail
+    then Option.is_some (Account.us_account account)
     else not (List.is_empty account.Account.addresses)
   ;;
 
@@ -225,7 +261,7 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
       (Config.payee config)
   ;;
 
-  let uk_draft (config : Config.t) (account : Account.t) ~id amount =
+  let domestic_draft (config : Config.t) (account : Account.t) ~id amount =
     Deferred.return
       (let open Or_error.Let_syntax in
        let%bind beneficiary = payee_beneficiary config ~owner:account.customer ~id in
@@ -269,11 +305,12 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
          ())
   ;;
 
-  (* A draft on the configured rail: SEPA details for SEPA rails, none for the others. *)
+  (* A draft on the configured rail: SEPA details for SEPA rails; the UK and US rails fill
+     in their own. *)
   let draft config account ~id amount =
     if is_sepa config
     then sepa_draft config account ~id amount
-    else uk_draft config account ~id amount
+    else domestic_draft config account ~id amount
   ;;
 
   (* Answers a challenge if there is one. *)
@@ -527,6 +564,8 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
                      (Card_core.Country.of_string
                         (if Money.Currency.equal config.currency Money.Currency.gbp
                          then "GB"
+                         else if Money.Currency.equal config.currency Money.Currency.usd
+                         then "US"
                          else "DE"))
                    ~amount:one)
             in

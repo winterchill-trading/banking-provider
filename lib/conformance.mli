@@ -1,6 +1,6 @@
 (** Scenarios every {!Provider.S} implementation must pass, in the currency and over the
     rail of the {!Config} ({!Config.default}: EUR over SCT Inst; {!Config.gbp}: GBP over
-    Faster Payments).
+    Faster Payments; {!Config.usd}: USD over ACH).
 
     The fake passes them in this repository's tests; an adapter for a real provider runs
     the same functor against its sandbox (behind an environment gate, since that needs
@@ -40,6 +40,11 @@ module Config : sig
       30 out, paid to sort code [99-00-00] (which no bank uses). Accounts must show a sort
       code and account number (or a GB IBAN). *)
   val gbp : run_id:string -> t
+
+  (** {!default} in USD over standard ACH (PPD): a synthetic US resident, USD 100 in and
+      USD 30 out, paid to a checking account at routing number [123456780] (valid check
+      digit, not looked up). Accounts must show a routing and account number. *)
+  val usd : run_id:string -> t
 
   (** [payee], else [payee_iban]. *)
   val payee : t -> string
