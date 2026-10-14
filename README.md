@@ -138,7 +138,10 @@ match%bind Fake_provider.initiate_transfer fake ~from:account.id draft >>| ok_ex
 - **Payee checks before paying.** `verify_payee ~customer beneficiary` answers `Match`,
   `Close_match` (with the name the bank holds), `No_match`, `Not_possible`,
   `Account_not_found` or `Unavailable` (UK Confirmation of Payee, SEPA Verification of
-  Payee); a scheme outage is an answer, not an error.
+  Payee); a scheme outage is an answer, not an error. Providers that also learn the
+  receiving account's currency offer `verify_payee_details` (the `Provider.Payee_details`
+  capability), which returns a `Payee_check_result` with `account_currency`, so an app
+  can warn before a payment that the receiving bank would convert.
 - **UK and US accounts.** GBP accounts may carry `Account.Address.Uk_account` (sort code
   and account number) instead of an IBAN, read by `Account.uk_account` (which also reads a
   GB IBAN); USD accounts carry `Us_account` (routing and account number, type), read by
