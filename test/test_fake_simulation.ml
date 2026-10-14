@@ -269,3 +269,19 @@ let%expect_test "a bounced deposit is rejected and never credited" =
       ()
       |}])
 ;;
+
+let%expect_test "an unsupported answer is recognized" =
+  let%map (result : unit Or_error.t) =
+    Sandbox.unsupported ~operation:"set_kyc_simulation"
+  in
+  print_s [%sexp (result : unit Or_error.t)];
+  print_s
+    [%sexp
+      (Result.error result |> Option.map ~f:Sandbox.is_unsupported : bool option)
+      , (Sandbox.is_unsupported (Error.of_string "other") : bool)];
+  [%expect
+    {|
+    (Error ("not supported by this sandbox" (operation set_kyc_simulation)))
+    ((true) false)
+    |}]
+;;
