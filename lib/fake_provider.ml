@@ -50,6 +50,7 @@ let provider_name = "fake"
 let supported_currencies =
   Money.Currency.
     [ eur
+    ; gbp
     ; btc
     ; btc_lightning
     ; eth
@@ -414,7 +415,7 @@ let simulate_kyc_decision t id (decision : Sandbox.Kyc_decision.t) =
 (* {2 Accounts} *)
 
 let network_of_currency (currency : Money.Currency.t)
-  : [ `Chain of Network.t | `Lightning | `Fiat ] Or_error.t
+  : [ `Chain of Network.t | `Lightning | `Fiat | `Uk ] Or_error.t
   =
   match
     ( Money.Currency.kind currency
@@ -422,8 +423,10 @@ let network_of_currency (currency : Money.Currency.t)
     , Money.Currency.network currency )
   with
   | Fiat, "EUR", None -> Ok `Fiat
+  | Fiat, "GBP", None -> Ok `Uk
   | Fiat, _, _ ->
-    Or_error.error_s [%message "the fake offers EUR only" (currency : Money.Currency.t)]
+    Or_error.error_s
+      [%message "the fake offers EUR and GBP only" (currency : Money.Currency.t)]
   | Crypto, "BTC", None -> Ok (`Chain Bitcoin)
   | Crypto, "BTC", Some "lightning" -> Ok `Lightning
   | Crypto, _, (None | Some "ethereum") -> Ok (`Chain Ethereum)
@@ -433,6 +436,9 @@ let network_of_currency (currency : Money.Currency.t)
   | Crypto, _, Some _ ->
     Or_error.error_s [%message "no network for currency" (currency : Money.Currency.t)]
 ;;
+
+(* No range of the published modulus tables covers 99-00-00, so it names no real bank. *)
+let fake_sort_code = Sort_code.of_string_exn "99-00-00"
 
 (* Deterministic, well-formed addresses: the bytes are a hash of the account id. *)
 let address_for t (account : Account.t) =
@@ -448,6 +454,17 @@ let address_for t (account : Account.t) =
     let check = Iban.check_digits ~country:"DE" ~bban in
     let%map iban = Iban.of_string ("DE" ^ check ^ bban) in
     Account.Address.Iban { iban; bic = None }
+  | `Uk ->
+    let number =
+      Int.of_string (String.drop_prefix (Account_ref.to_string account.id) 4)
+    in
+    let%map account =
+      Uk_account.create
+        ~sort_code:fake_sort_code
+        ~account_number:(sprintf "%08d" number)
+        ()
+    in
+    Account.Address.Uk_account account
   | `Lightning -> Ok (Account.Address.Lightning_node { node_id = "02" ^ hex seed })
   | `Chain network ->
     let raw =
@@ -486,7 +503,7 @@ let open_account t id currency =
        | status ->
          Or_error.error_s [%message "KYC not approved" (status : Kyc_core.Status.t)]
      in
-     let%bind (_ : [ `Chain of Network.t | `Lightning | `Fiat ]) =
+     let%bind (_ : [ `Chain of Network.t | `Lightning | `Fiat | `Uk ]) =
        network_of_currency currency
      in
      let existing =
@@ -692,8 +709,8 @@ let settle_steps t (s : transfer_state) : Transfer_update.t list =
         }
     ; Settled
     ]
-  | Sepa_credit, _ -> [ Pending; Settled ]
-  | (Sepa_instant | Lightning | Intraledger | Card_scheme), _ ->
+  | (Sepa_credit | Chaps | Bacs), _ -> [ Pending; Settled ]
+  | (Sepa_instant | Lightning | Intraledger | Card_scheme | Faster_payments), _ ->
     ignore t;
     [ Settled ]
 ;;
@@ -904,6 +921,9 @@ let simulate_transfer_outcome t id update =
 let sandbox_sender_iban = "DE89370400440532013000"
 let sandbox_sender_name = "Sandbox Sender"
 
+(* The UK sender of simulated GBP deposits, at the fake's own sort code. *)
+let sandbox_sender_uk = "99-00-00 12345678"
+
 (* SEPA identifiers may not contain '_'. *)
 let sepa_id s = String.tr s ~target:'_' ~replacement:'-'
 
@@ -954,6 +974,16 @@ let deposit_details t (a : account_state) ~rail ~provider_ref
       ( Transfer.Details.Intraledger
       , Transfer.Counterparty.External { name = "internal"; detail = "" }
       , true )
+  | Faster_payments | Chaps | Bacs ->
+    let%map (_ : Uk_account.t) =
+      Account.uk_account a.account
+      |> Or_error.of_option
+           ~error:(Error.of_string "account has no sort code yet; enrich it")
+    in
+    ( Transfer.Details.Uk_domestic { scheme_ref = Some provider_ref; value_date = None }
+    , Transfer.Counterparty.External
+        { name = sandbox_sender_name; detail = sandbox_sender_uk }
+    , true )
   | Card_scheme ->
     ignore t;
     Or_error.error_string "card refunds come from refund_card, not a deposit"
