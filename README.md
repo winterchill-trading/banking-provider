@@ -101,7 +101,7 @@ match%bind Fake_provider.initiate_transfer fake ~from:account.id draft >>| ok_ex
 | Module | What it is |
 | --- | --- |
 | `Provider.S` | What an application needs from a provider, in Async with `Or_error` |
-| `Sandbox.S` | Simulations a sandbox offers: deposit, KYC decision, card authorization, transfer outcome, ping |
+| `Sandbox.S` | Simulations a sandbox offers: deposit, KYC decision, card authorization, transfer outcome, ping; settings for automatic KYC decisions and deposit timing |
 | `Event` | The normalized event union with the provider's event id; `Stable.V1` with a pinned digest |
 | `Transfer_update` | A provider's report about a transfer, and `apply` that treats redeliveries and overtaken reports as `Stale` |
 | `Card_update` | Card status and scheme messages (request, advice, reversal, clearing, expiry) in card-core types |
@@ -111,6 +111,7 @@ match%bind Fake_provider.initiate_transfer fake ~from:account.id draft >>| ok_ex
 | `Inbox` | In-memory dedup by event id (a service keeps the durable one in its own store) |
 | `Sensitive` | Codes, tokens and secrets that print as `<redacted>`; constant-time equality |
 | `Fake_provider` | Deterministic in-memory provider over a ledger journal |
+| `Fake_details` | Deterministic, well-formed bank details per market (EU, GB, US, KG, CH) derived from a key |
 | `Conformance` | Scenarios as a functor over `Provider.S` and `Sandbox.S` |
 | `Customer_ref`, `Account_ref`, `Event_id`, `Standing_order_ref` | Provider-side ids |
 
@@ -141,7 +142,9 @@ match%bind Fake_provider.initiate_transfer fake ~from:account.id draft >>| ok_ex
 - **UK and US accounts.** GBP accounts may carry `Account.Address.Uk_account` (sort code
   and account number) instead of an IBAN, read by `Account.uk_account` (which also reads a
   GB IBAN); USD accounts carry `Us_account` (routing and account number, type), read by
-  `Account.us_account`.
+  `Account.us_account`. Other domestic formats are `Local { scheme; fields }` (`kg`: bank
+  code and account number; `ch_qr_iban`: the QR-IBAN beside a Swiss IBAN), read by
+  `Account.local`. `Account.Address.to_display_lines` prints any of them for people.
 
 See [docs/contract.md](docs/contract.md) for what an adapter must normalize and why.
 
@@ -156,7 +159,9 @@ says and the trial balance always holds.
 | Simulated | How |
 | --- | --- |
 | KYC: e-mail and mobile codes, hosted document and liveness, approve, reject, resubmission | `start_verification`, `complete_verification`, `simulate_kyc_decision` |
-| IBAN, UK and US details and deposit addresses (valid DE IBANs, sort code 99-00-00 for GBP, routing number 123456780 for USD, Bech32, EIP-55, Tron, Solana, Spark) | `enrich_account`, or `auto_enrich` |
+| IBAN, UK, US, Swiss and Kyrgyz details and deposit addresses (valid DE IBANs, sort code 99-00-00 with modulus-checked numbers for GBP, routing number 123456780 for USD, CH IBAN and QR-IBAN for CHF, bank code and account number for KGS, Bech32, EIP-55, Tron, Solana, Spark), all derived from the open-account key so they survive a restart | `enrich_account`, or `auto_enrich`; `open_account_with_key` for several accounts in one currency |
+| Automatic KYC decisions (approved, pending review, rejected) a delay after the last hosted step, per customer or for all | `set_kyc_simulation` |
+| Delayed and bounced deposits, per customer or for all | `set_deposit_simulation` |
 | SEPA, SCT Inst, Faster Payments, CHAPS, Bacs, ACH, RTP, Fedwire, on-chain (confirmations later), Lightning and internal deposits | `simulate_deposit` |
 | Payments per rail: SEPA, CHAPS, Bacs and ACH `Pending` then `Settled`, SCT Inst, Faster Payments, RTP and Fedwire `Settled`, on-chain confirmations, Lightning preimage | settlement mode `Immediate`, `Delayed span` or `Manual` |
 | Rejections, SCT Inst timeout and late settlement, returns, recalls, reorgs | `simulate_transfer_outcome` |
@@ -172,13 +177,14 @@ person beyond accepting it.
 
 ## Conformance
 
-`Conformance.Make (P) (S)` gives twelve scenarios, each awaiting results through
+`Conformance.Make (P) (S)` gives fourteen scenarios, each awaiting results through
 events or polling within a timeout, so a sandbox that provisions an IBAN minutes later
 still passes: idempotent customers, KYC approval event, an account with the address
 its rail needs, deposit event and balance, SCA-confirmed payment debiting amount plus
 fee, resend pays once, overdraft refused, wrong code refused, unsigned webhook refused,
-ping event, card approved and declined `57` when frozen, and a payee check that returns
-a simulated answer. The currency and rail come from the config: `Config.default` is EUR
+ping event, card approved and declined `57` when frozen, a payee check that returns
+a simulated answer, an account that keeps its details when opened and enriched again,
+and a KYC decision set to wait that arrives after its delay. The currency and rail come from the config: `Config.default` is EUR
 over SCT Inst, `Config.gbp` GBP over Faster Payments to a UK sort code, `Config.usd` USD over ACH to
 a US checking account. The fake passes all three in `test/` (immediately, and with fees and delayed settlement on the wall clock);
 an adapter runs the same functor against its sandbox behind an environment gate.
@@ -190,7 +196,8 @@ unversioned `bin_io` of `Account.t` and `Account.Address.t`. UK or US rails, acc
 transfer details, and addresses on the newer networks (Base, Arbitrum, Plasma, Spark),
 cannot be written in those formats (it raises); persist events with `Event.Stable.V2`
 and accounts with `Account.Stable.V2` wherever GBP, USD or those networks can occur. V1 bytes
-read as V2.
+read as V2. `Local` addresses need `Event.Stable.V3` and `Account.Stable.V3`; V2 bytes
+read as V3.
 
 ## Storage
 
