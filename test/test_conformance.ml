@@ -11,9 +11,24 @@ let print_results results =
     | Error e -> printf "FAIL %s\n     %s\n" name (Error.to_string_hum e))
 ;;
 
+(* The suite waits on the wall clock while the fake's timers run on its synthetic clock;
+   moving that clock along with wall time lets the delayed-KYC scenario finish. *)
+let ticking clock f =
+  let stop = Ivar.create () in
+  let step = Time_ns.Span.of_ms 5. in
+  Clock_ns.every ~stop:(Ivar.read stop) step (fun () ->
+    don't_wait_for (Time_source.advance_by_alarms_by clock step));
+  let%map result = f () in
+  Ivar.fill_exn stop ();
+  result
+;;
+
 let%expect_test "the fake passes the conformance suite" =
-  with_fake (fun ~clock:_ ~journal:_ fake ->
-    let%map results = Suite.run_all (Conformance.Config.default ~run_id:"conf") fake in
+  with_fake (fun ~clock ~journal:_ fake ->
+    let%map results =
+      ticking clock
+      @@ fun () -> Suite.run_all (Conformance.Config.default ~run_id:"conf") fake
+    in
     print_results results;
     [%expect
       {|
@@ -28,6 +43,8 @@ let%expect_test "the fake passes the conformance suite" =
       ok   a webhook with a bad signature is refused
       ok   a test delivery arrives as a Ping event
       ok   a virtual card is approved, and declined with 57 once frozen
+      ok   an account keeps its details when opened and enriched again
+      ok   a KYC decision set to wait comes after its delay
       ok   verify_payee answers, and a simulated answer is returned
       |}])
 ;;
@@ -68,13 +85,18 @@ let%expect_test "with a fee and delayed settlement" =
       ok   a webhook with a bad signature is refused
       ok   a test delivery arrives as a Ping event
       ok   a virtual card is approved, and declined with 57 once frozen
+      ok   an account keeps its details when opened and enriched again
+      ok   a KYC decision set to wait comes after its delay
       ok   verify_payee answers, and a simulated answer is returned
       |}])
 ;;
 
 let%expect_test "the fake passes the GBP conformance run" =
-  with_fake (fun ~clock:_ ~journal:_ fake ->
-    let%map results = Suite.run_all (Conformance.Config.gbp ~run_id:"conf-gbp") fake in
+  with_fake (fun ~clock ~journal:_ fake ->
+    let%map results =
+      ticking clock
+      @@ fun () -> Suite.run_all (Conformance.Config.gbp ~run_id:"conf-gbp") fake
+    in
     print_results results;
     [%expect
       {|
@@ -89,6 +111,8 @@ let%expect_test "the fake passes the GBP conformance run" =
       ok   a webhook with a bad signature is refused
       ok   a test delivery arrives as a Ping event
       ok   a virtual card is approved, and declined with 57 once frozen
+      ok   an account keeps its details when opened and enriched again
+      ok   a KYC decision set to wait comes after its delay
       ok   verify_payee answers, and a simulated answer is returned
       |}])
 ;;
@@ -130,13 +154,18 @@ let%expect_test "GBP with a Faster Payments fee and delayed settlement" =
       ok   a webhook with a bad signature is refused
       ok   a test delivery arrives as a Ping event
       ok   a virtual card is approved, and declined with 57 once frozen
+      ok   an account keeps its details when opened and enriched again
+      ok   a KYC decision set to wait comes after its delay
       ok   verify_payee answers, and a simulated answer is returned
       |}])
 ;;
 
 let%expect_test "the fake passes the USD conformance run" =
-  with_fake (fun ~clock:_ ~journal:_ fake ->
-    let%map results = Suite.run_all (Conformance.Config.usd ~run_id:"conf-usd") fake in
+  with_fake (fun ~clock ~journal:_ fake ->
+    let%map results =
+      ticking clock
+      @@ fun () -> Suite.run_all (Conformance.Config.usd ~run_id:"conf-usd") fake
+    in
     print_results results;
     [%expect
       {|
@@ -151,6 +180,8 @@ let%expect_test "the fake passes the USD conformance run" =
       ok   a webhook with a bad signature is refused
       ok   a test delivery arrives as a Ping event
       ok   a virtual card is approved, and declined with 57 once frozen
+      ok   an account keeps its details when opened and enriched again
+      ok   a KYC decision set to wait comes after its delay
       ok   verify_payee answers, and a simulated answer is returned
       |}])
 ;;

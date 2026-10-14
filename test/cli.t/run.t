@@ -35,4 +35,6 @@ The fake passes the conformance suite:
   ok   a webhook with a bad signature is refused
   ok   a test delivery arrives as a Ping event
   ok   a virtual card is approved, and declined with 57 once frozen
+  ok   an account keeps its details when opened and enriched again
+  ok   a KYC decision set to wait comes after its delay
   ok   verify_payee answers, and a simulated answer is returned

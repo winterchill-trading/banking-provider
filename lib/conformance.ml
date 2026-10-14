@@ -15,6 +15,7 @@ module Config = struct
     ; currency : Money.Currency.t
     ; rail : Rail.t
     ; payee : string option
+    ; kyc_delay : Time_ns.Span.t
     }
 
   let eur s = Money.Amount.of_decimal_string Money.Currency.eur s |> Or_error.ok_exn
@@ -92,6 +93,7 @@ module Config = struct
     ; currency = Money.Currency.eur
     ; rail = Sepa_instant
     ; payee = None
+    ; kyc_delay = Time_ns.Span.of_ms 200.
     }
   ;;
 
@@ -121,6 +123,10 @@ module Config = struct
 
   let payee t = Option.value t.payee ~default:t.payee_iban
 end
+
+(* The functor's argument is called [Sandbox] too; this keeps the module's helpers in
+   reach. *)
+module Sandbox_lib = Sandbox
 
 module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
   type scenario =
@@ -582,6 +588,68 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
               (Card_core.Response_code.equal frozen Not_permitted)
               !"frozen card answered %{Card_core.Response_code}"
               frozen)
+      }
+    ; { name = "an account keeps its details when opened and enriched again"
+      ; run =
+          (fun t ->
+            let%bind customer = approved_customer config t "details" in
+            let%bind account = rail_account config t customer.id in
+            let%bind again = P.open_account t customer.id config.currency in
+            let%bind enriched = P.enrich_account t account.id in
+            let%bind listed = P.accounts t customer.id in
+            let same_details (other : Account.t) =
+              List.equal Account.Address.equal account.addresses other.addresses
+            in
+            let%bind () =
+              check_d
+                (Account_ref.equal again.id account.id)
+                "a second open_account opened another account"
+            in
+            let%bind () =
+              check_d (same_details enriched) "enriching again changed the details"
+            in
+            check_d
+              (List.exists listed ~f:(fun a ->
+                 Account_ref.equal a.id account.id && same_details a))
+              "accounts shows other details for the account")
+      }
+    ; { name = "a KYC decision set to wait comes after its delay"
+      ; run =
+          (fun t ->
+            let%bind customer =
+              P.create_customer
+                t
+                ~customer_id:(customer_id config "kyc-delay")
+                ~person:config.person
+            in
+            match%bind.Deferred
+              Sandbox.set_kyc_simulation
+                t
+                ~customer:customer.id
+                (Decide { outcome = Approved; delay = config.kyc_delay })
+            with
+            | Error e when Sandbox_lib.is_unsupported e ->
+              (* A sandbox without the control has nothing to check here. *)
+              return ()
+            | Error _ as e -> Deferred.return e
+            | Ok () ->
+              let%bind (_ : Customer.Verification_session.t) =
+                P.start_verification t customer.id Identity_document
+              in
+              let%bind early = P.kyc_status t customer.id in
+              let%bind () =
+                check_d
+                  (not (Kyc_core.Status.equal early.status Approved))
+                  "approved before the delay"
+              in
+              let%map (_ : Customer.Kyc_status.t) =
+                poll config ~what:"the delayed KYC approval" (fun () ->
+                  let%map status = P.kyc_status t customer.id in
+                  match status.status with
+                  | Approved -> Some status
+                  | _ -> None)
+              in
+              ())
       }
     ; { name = "verify_payee answers, and a simulated answer is returned"
       ; run =

@@ -9,6 +9,12 @@
     IBAN minutes later or settles a payment asynchronously still passes. Every customer id
     starts with [run_id], so reruns against a shared sandbox do not collide.
 
+    Two scenarios cover the sandbox's own behaviour: an account keeps the same details
+    when it is opened and enriched again, and a KYC decision set with
+    {!Sandbox.S.set_kyc_simulation} to wait [kyc_delay] is not there at once and arrives
+    after it. A sandbox that answers {!Sandbox.unsupported} to that setting passes the
+    second without checking anything.
+
     Each scenario returns [Ok ()] or an error saying what did not hold. *)
 
 open! Core
@@ -30,10 +36,13 @@ module Config : sig
     ; payee : string option
     (** the payee's destination as {!Payments_core.Beneficiary.create} reads it for
         [rail]; [None] means [payee_iban] *)
+    ; kyc_delay : Time_ns.Span.t
+    (** the delay the delayed-KYC scenario sets; shorter than [timeout] *)
     }
 
   (** A synthetic person, [Fake_provider.sandbox_code], a public example IBAN, EUR 100 in
-      and EUR 30 out over SCT Inst, 10 second timeouts polled every 50 ms. *)
+      and EUR 30 out over SCT Inst, 10 second timeouts polled every 50 ms, a 200 ms KYC
+      delay. *)
   val default : run_id:string -> t
 
   (** {!default} in GBP over Faster Payments: a synthetic UK resident, GBP 100 in and GBP
