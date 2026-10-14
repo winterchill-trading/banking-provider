@@ -51,6 +51,7 @@ let supported_currencies =
   Money.Currency.
     [ eur
     ; gbp
+    ; usd
     ; btc
     ; btc_lightning
     ; eth
@@ -417,7 +418,7 @@ let simulate_kyc_decision t id (decision : Sandbox.Kyc_decision.t) =
 (* {2 Accounts} *)
 
 let network_of_currency (currency : Money.Currency.t)
-  : [ `Chain of Network.t | `Lightning | `Fiat | `Uk ] Or_error.t
+  : [ `Chain of Network.t | `Lightning | `Fiat | `Uk | `Us ] Or_error.t
   =
   match
     ( Money.Currency.kind currency
@@ -426,21 +427,30 @@ let network_of_currency (currency : Money.Currency.t)
   with
   | Fiat, "EUR", None -> Ok `Fiat
   | Fiat, "GBP", None -> Ok `Uk
+  | Fiat, "USD", None -> Ok `Us
   | Fiat, _, _ ->
     Or_error.error_s
-      [%message "the fake offers EUR and GBP only" (currency : Money.Currency.t)]
+      [%message "the fake offers EUR, GBP and USD only" (currency : Money.Currency.t)]
   | Crypto, "BTC", None -> Ok (`Chain Bitcoin)
   | Crypto, "BTC", Some "lightning" -> Ok `Lightning
   | Crypto, _, (None | Some "ethereum") -> Ok (`Chain Ethereum)
   | Crypto, _, Some "polygon" -> Ok (`Chain Polygon)
   | Crypto, _, Some "solana" -> Ok (`Chain Solana)
   | Crypto, _, Some "tron" -> Ok (`Chain Tron)
+  | Crypto, _, Some "base" -> Ok (`Chain Base)
+  | Crypto, _, Some "arbitrum" -> Ok (`Chain Arbitrum)
+  | Crypto, _, Some "plasma" -> Ok (`Chain Plasma)
+  | Crypto, _, Some "spark" -> Ok (`Chain Spark)
   | Crypto, _, Some _ ->
     Or_error.error_s [%message "no network for currency" (currency : Money.Currency.t)]
 ;;
 
 (* No range of the published modulus tables covers 99-00-00, so it names no real bank. *)
 let fake_sort_code = Sort_code.of_string_exn "99-00-00"
+
+(* A routing number with a valid check digit, not looked up in the Federal Reserve's
+   directory. *)
+let fake_routing = Aba.of_string_exn "123456780"
 
 (* Deterministic, well-formed addresses: the bytes are a hash of the account id. *)
 let address_for t (account : Account.t) =
@@ -467,6 +477,14 @@ let address_for t (account : Account.t) =
         ()
     in
     Account.Address.Uk_account account
+  | `Us ->
+    let number =
+      Int.of_string (String.drop_prefix (Account_ref.to_string account.id) 4)
+    in
+    let%map account =
+      Us_account.create ~routing:fake_routing ~account_number:(sprintf "%010d" number) ()
+    in
+    Account.Address.Us_account account
   | `Lightning -> Ok (Account.Address.Lightning_node { node_id = "02" ^ hex seed })
   | `Chain network ->
     let raw =
@@ -475,7 +493,19 @@ let address_for t (account : Account.t) =
         Bech32.encode_segwit ~hrp:"bc" ~version:0 ~program:(String.prefix seed 20)
       | Bitcoin_testnet ->
         Bech32.encode_segwit ~hrp:"tb" ~version:0 ~program:(String.prefix seed 20)
-      | Ethereum | Polygon -> "0x" ^ hex (String.prefix seed 20)
+      | Ethereum | Polygon | Base | Arbitrum | Plasma ->
+        "0x" ^ hex (String.prefix seed 20)
+      | Spark ->
+        Bech32.encode
+          ~hrp:"sp"
+          ~data:
+            (Bech32.convert_bits
+               (List.map (String.to_list (String.prefix seed 32)) ~f:Char.to_int)
+               ~from:8
+               ~to_:5
+               ~pad:true
+             |> Option.value_exn)
+          Bech32m
       | Tron -> Base58.encode_check ("\x41" ^ String.prefix seed 20)
       | Solana -> Base58.encode seed
     in
@@ -505,7 +535,7 @@ let open_account t id currency =
        | status ->
          Or_error.error_s [%message "KYC not approved" (status : Kyc_core.Status.t)]
      in
-     let%bind (_ : [ `Chain of Network.t | `Lightning | `Fiat | `Uk ]) =
+     let%bind (_ : [ `Chain of Network.t | `Lightning | `Fiat | `Uk | `Us ]) =
        network_of_currency currency
      in
      let existing =
@@ -711,8 +741,15 @@ let settle_steps t (s : transfer_state) : Transfer_update.t list =
         }
     ; Settled
     ]
-  | (Sepa_credit | Chaps | Bacs), _ -> [ Pending; Settled ]
-  | (Sepa_instant | Lightning | Intraledger | Card_scheme | Faster_payments), _ ->
+  | (Sepa_credit | Chaps | Bacs | Ach _), _ -> [ Pending; Settled ]
+  | ( ( Sepa_instant
+      | Lightning
+      | Intraledger
+      | Card_scheme
+      | Faster_payments
+      | Rtp
+      | Fedwire )
+    , _ ) ->
     ignore t;
     [ Settled ]
 ;;
@@ -926,6 +963,9 @@ let sandbox_sender_name = "Sandbox Sender"
 (* The UK sender of simulated GBP deposits, at the fake's own sort code. *)
 let sandbox_sender_uk = "99-00-00 12345678"
 
+(* The US sender of simulated USD deposits, at the fake's own routing number. *)
+let sandbox_sender_us = "123456780 0000000001 checking"
+
 (* SEPA identifiers may not contain '_'. *)
 let sepa_id s = String.tr s ~target:'_' ~replacement:'-'
 
@@ -985,6 +1025,17 @@ let deposit_details t (a : account_state) ~rail ~provider_ref
     ( Transfer.Details.Uk_domestic { scheme_ref = Some provider_ref; value_date = None }
     , Transfer.Counterparty.External
         { name = sandbox_sender_name; detail = sandbox_sender_uk }
+    , true )
+  | Ach _ | Rtp | Fedwire ->
+    let%map (_ : Us_account.t) =
+      Account.us_account a.account
+      |> Or_error.of_option
+           ~error:(Error.of_string "account has no routing number yet; enrich it")
+    in
+    ( Transfer.Details.Us_domestic
+        { scheme_ref = Some provider_ref; effective_date = None }
+    , Transfer.Counterparty.External
+        { name = sandbox_sender_name; detail = sandbox_sender_us }
     , true )
   | Card_scheme ->
     ignore t;
@@ -1788,7 +1839,8 @@ let verify_payee t ~customer (beneficiary : Beneficiary.t) =
        (match beneficiary.destination with
         | Uk_account a -> by_suffix a.account_number
         | Bank_account { iban; _ } -> by_suffix (Iban.to_string iban)
-        | Crypto _ | Lightning _ | Internal _ -> Not_possible))
+        (* No US scheme checks payee names. *)
+        | Crypto _ | Lightning _ | Internal _ | Us_account _ -> Not_possible))
 ;;
 
 let ping t = return (Ok (ignore (emit t Ping : Event.t)))
