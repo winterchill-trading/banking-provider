@@ -88,6 +88,10 @@ Do not poll in a loop.
   still; a frozen clock makes idempotency keys collide.
 - The fake's webhook signatures expire after five minutes of its clock. Redeliver inside the
   window to test de-duplication, or the request fails at the signature check first.
+- `Event.Stable.V1` and the unversioned `bin_io` of `Account` keep their old format and raise
+  on UK rails, accounts and details; persist with `Event.Stable.V2` / `Account.Stable.V2`.
+- Adding a value to `Provider.S` or `Sandbox.S` breaks every adapter: build striga-provider,
+  griffin-provider and lightspark-provider after such a change.
 - `dune promote` fills cram output. Read the diff before promoting; it overwrites edits made
   after the failing run.
 
