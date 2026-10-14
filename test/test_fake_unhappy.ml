@@ -147,7 +147,7 @@ let%expect_test "on-chain deposit: pending until confirmations arrive later" =
       {|
       ((Crypto
         (address
-         ((network Bitcoin) (address bc1qngrfsa58rwnlg55md52ck3vhwth6k6lyv0a282)))
+         ((network Bitcoin) (address bc1qps376qmuz9glc7jau0ck2nhrfc8ks257qzgtuj)))
         (memo ())))
       ((available "0.00000000 BTC") (held "0.00000000 BTC")
        (posted "0.00000000 BTC"))

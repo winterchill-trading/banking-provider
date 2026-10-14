@@ -19,7 +19,7 @@ let%expect_test "onboarding: KYC events, an account and an IBAN" =
       (evt_000004
        (Account_updated
         ((id acc_000001) (customer cus_000001) (currency EUR) (status Open)
-         (addresses ((Iban (iban DE97500105170000000001) (bic ()))))
+         (addresses ((Iban (iban DE38500105175255720829) (bic ()))))
          (opened_at "2026-10-13 09:00:00Z"))))
       |}];
     let%bind status = ok (Fake_provider.kyc_status fake customer.id) in
@@ -28,7 +28,7 @@ let%expect_test "onboarding: KYC events, an account and an IBAN" =
     [%expect
       {|
       (Approved T0)
-      ((Iban (iban DE97500105170000000001) (bic ())))
+      ((Iban (iban DE38500105175255720829) (bic ())))
       |}];
     return ())
 ;;
@@ -64,7 +64,7 @@ let%expect_test "SEPA deposit, then a payment confirmed by SCA" =
             ((name "Sandbox Sender") (iban DE89370400440532013000) (bic ())
              (address ())))
            (creditor
-            ((name "Account Holder") (iban DE97500105170000000001) (bic ())
+            ((name "Account Holder") (iban DE38500105175255720829) (bic ())
              (address ())))
            (remittance None_given) (charge_bearer SLEV) (purpose ())
            (requested_execution_date ()) (acceptance_time ()) (value_date ())

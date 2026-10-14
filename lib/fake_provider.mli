@@ -26,12 +26,15 @@
     with {!sandbox_code}, unless [sca] is off in the config.
 
     {b Currencies.} EUR accounts get a German IBAN, GBP accounts a UK sort code
-    ([99-00-00], which no bank uses) and account number, and USD accounts routing number
-
-    [123456780] (valid check digit, not looked up) and a ten-digit account number; crypto
-    accounts get an address on their network. GBP moves on Faster Payments (settled at
-    once), CHAPS and Bacs (pending, then settled); USD on RTP and Fedwire (settled at
-    once) and ACH (pending, then settled).
+    ([99-00-00], which no bank uses) and an account number that passes its modulus check,
+    USD accounts routing number [123456780] (valid check digit, not looked up) and a
+    ten-digit account number, CHF accounts a Swiss IBAN and its QR-IBAN, and KGS accounts
+    (once the caller registers the currency) a local bank code and account number; crypto
+    accounts get an address on their network. All of them derive from the open-account
+    idempotency key (see {!open_account_with_key} and {!Fake_details}), not from the
+    account id, so a restarted fake gives a customer the same details again. GBP moves on
+    Faster Payments (settled at once), CHAPS and Bacs (pending, then settled); USD on RTP
+    and Fedwire (settled at once) and ACH (pending, then settled).
 
     {b Payee checks.} {!verify_payee} answers what {!simulate_payee_check} last fixed for
     the beneficiary. Otherwise it goes by the last two characters of the account number or
@@ -93,6 +96,20 @@ include Provider.S with type t := t
 include Sandbox.S with type t := t
 
 (** {2 Fake-only controls} *)
+
+(** {!open_account} with an explicit idempotency key: the same key returns the account it
+    opened (an error if that account is another customer's or in another currency), and a
+    new key opens a further account, so a customer can hold several accounts in one
+    currency. The account's details derive from the key ({!Fake_details}), so they are the
+    same after a restart. {!open_account} itself uses [<customer id>/<currency>], our
+    customer id being the one given to {!create_customer}, and returns the customer's
+    existing account in that currency if there is one. *)
+val open_account_with_key
+  :  t
+  -> Customer_ref.t
+  -> Money.Currency.t
+  -> idempotency_key:string
+  -> Account.t Or_error.t Deferred.t
 
 (** Pays every confirmed standing order that is due at the time source's current time;
     returns our ids of the transfers it started. *)

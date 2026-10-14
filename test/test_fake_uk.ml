@@ -27,8 +27,8 @@ let%expect_test "a GBP account gets a sort code and account number" =
         , (Account.iban account : Iban.t option)];
     [%expect
       {|
-      ((Uk_account ((sort_code 990000) (account_number 00000001) (roll_number ()))))
-      (("99-00-00 00000001") ())
+      ((Uk_account ((sort_code 990000) (account_number 68478747) (roll_number ()))))
+      (("99-00-00 68478747") ())
       |}])
 ;;
 
@@ -92,7 +92,7 @@ let%expect_test "GBP deposits and payments on the UK rails" =
         ((id acc_000001) (customer cus_000001) (currency GBP) (status Open)
          (addresses
           ((Uk_account
-            ((sort_code 990000) (account_number 00000001) (roll_number ())))))
+            ((sort_code 990000) (account_number 68478747) (roll_number ())))))
          (opened_at "2026-10-13 09:00:00Z"))))
       (evt_000005
        (Incoming_transfer (account acc_000001) (transfer in:dep_000001)
@@ -203,7 +203,7 @@ let%expect_test "USD accounts and US payments" =
     print_s [%sexp (check : Beneficiary.Payee_check.t)];
     [%expect
       {|
-      ("123456780 0000000001 checking")
+      ("123456780 9262868376 checking")
       (evt_000005
        (Incoming_transfer (account acc_000001) (transfer in:dep_000001)
         (provider_ref dep_000001) (rail Rtp) (amount "100.00 USD") (fee "0.00 USD")

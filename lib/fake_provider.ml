@@ -73,6 +73,7 @@ type customer_state =
 type account_state =
   { mutable account : Account.t
   ; ledger : Ledger.Account_id.t
+  ; key : string (** the open-account idempotency key; the details derive from it *)
   }
 
 type transfer_state =
@@ -122,6 +123,7 @@ type t =
   ; customers : customer_state Customer_ref.Table.t
   ; customers_by_id : Customer_ref.t Kyc_core.Customer_id.Table.t
   ; accounts : account_state Account_ref.Table.t
+  ; accounts_by_key : Account_ref.t String.Table.t
   ; transfers : transfer_state Transfer.Id.Table.t
   ; challenges : challenge_state Sca.Id.Table.t
   ; swaps : swap_state Swap.Id.Table.t
@@ -153,19 +155,25 @@ let counters t =
   Hashtbl.to_alist t.counters |> List.sort ~compare:[%compare: string * int]
 ;;
 
+(* The system accounts the booking rules need for [currencies]; opening one twice is fine,
+   so this runs at creation and again for a currency outside the default list. *)
+let open_system_accounts ~chart ~card_chart journal ~currencies =
+  (* Both charts name the fee income accounts; open each id once. *)
+  Booking.Chart.accounts chart ~rails:Rail.all ~currencies
+  @ Card_core.Booking.Chart.accounts card_chart ~currencies
+  |> List.stable_dedup
+       ~compare:(Comparable.lift Ledger.Account_id.compare ~f:Ledger.Account.id)
+  |> List.map ~f:(fun account ->
+    Ledger.Journal.open_account journal account |> Or_error.map ~f:ignore)
+  |> Or_error.all_unit
+;;
+
 let create ?(config = Config.default) ?(counters = []) ~time_source ~journal () =
   let open Or_error.Let_syntax in
   let chart = Booking.Chart.default in
   let card_chart = Card_core.Booking.Chart.default in
   let%map () =
-    (* Both charts name the fee income accounts; open each id once. *)
-    Booking.Chart.accounts chart ~rails:Rail.all ~currencies:supported_currencies
-    @ Card_core.Booking.Chart.accounts card_chart ~currencies:supported_currencies
-    |> List.stable_dedup
-         ~compare:(Comparable.lift Ledger.Account_id.compare ~f:Ledger.Account.id)
-    |> List.map ~f:(fun account ->
-      Ledger.Journal.open_account journal account |> Or_error.map ~f:ignore)
-    |> Or_error.all_unit
+    open_system_accounts ~chart ~card_chart journal ~currencies:supported_currencies
   in
   { config
   ; time_source = Time_source.read_only time_source
@@ -181,6 +189,7 @@ let create ?(config = Config.default) ?(counters = []) ~time_source ~journal () 
   ; customers = Customer_ref.Table.create ()
   ; customers_by_id = Kyc_core.Customer_id.Table.create ()
   ; accounts = Account_ref.Table.create ()
+  ; accounts_by_key = String.Table.create ()
   ; transfers = Transfer.Id.Table.create ()
   ; challenges = Sca.Id.Table.create ()
   ; swaps = Swap.Id.Table.create ()
@@ -418,19 +427,18 @@ let simulate_kyc_decision t id (decision : Sandbox.Kyc_decision.t) =
 (* {2 Accounts} *)
 
 let network_of_currency (currency : Money.Currency.t)
-  : [ `Chain of Network.t | `Lightning | `Fiat | `Uk | `Us ] Or_error.t
+  : [ `Chain of Network.t | `Lightning | `Fiat ] Or_error.t
   =
   match
     ( Money.Currency.kind currency
     , Money.Currency.code currency
     , Money.Currency.network currency )
   with
-  | Fiat, "EUR", None -> Ok `Fiat
-  | Fiat, "GBP", None -> Ok `Uk
-  | Fiat, "USD", None -> Ok `Us
+  | Fiat, ("EUR" | "GBP" | "USD" | "CHF" | "KGS"), None -> Ok `Fiat
   | Fiat, _, _ ->
     Or_error.error_s
-      [%message "the fake offers EUR, GBP and USD only" (currency : Money.Currency.t)]
+      [%message
+        "the fake offers EUR, GBP, USD, CHF and KGS only" (currency : Money.Currency.t)]
   | Crypto, "BTC", None -> Ok (`Chain Bitcoin)
   | Crypto, "BTC", Some "lightning" -> Ok `Lightning
   | Crypto, _, (None | Some "ethereum") -> Ok (`Chain Ethereum)
@@ -445,47 +453,15 @@ let network_of_currency (currency : Money.Currency.t)
     Or_error.error_s [%message "no network for currency" (currency : Money.Currency.t)]
 ;;
 
-(* No range of the published modulus tables covers 99-00-00, so it names no real bank. *)
-let fake_sort_code = Sort_code.of_string_exn "99-00-00"
-
-(* A routing number with a valid check digit, not looked up in the Federal Reserve's
-   directory. *)
-let fake_routing = Aba.of_string_exn "123456780"
-
-(* Deterministic, well-formed addresses: the bytes are a hash of the account id. *)
-let address_for t (account : Account.t) =
+(* Deterministic, well-formed details: fiat details come from {!Fake_details} and crypto
+   addresses from a hash, both of the open-account key, so the same key gets the same
+   details after a restart, whatever the id counters say. *)
+let addresses_for t (a : account_state) =
   let open Or_error.Let_syntax in
-  let seed = digest ("fake-address:" ^ Account_ref.to_string account.id) in
-  match%bind network_of_currency account.currency with
-  | `Fiat ->
-    (* German layout: 8-digit bank code and 10-digit account number. *)
-    let number =
-      Int.of_string (String.drop_prefix (Account_ref.to_string account.id) 4)
-    in
-    let bban = sprintf "50010517%010d" number in
-    let check = Iban.check_digits ~country:"DE" ~bban in
-    let%map iban = Iban.of_string ("DE" ^ check ^ bban) in
-    Account.Address.Iban { iban; bic = None }
-  | `Uk ->
-    let number =
-      Int.of_string (String.drop_prefix (Account_ref.to_string account.id) 4)
-    in
-    let%map account =
-      Uk_account.create
-        ~sort_code:fake_sort_code
-        ~account_number:(sprintf "%08d" number)
-        ()
-    in
-    Account.Address.Uk_account account
-  | `Us ->
-    let number =
-      Int.of_string (String.drop_prefix (Account_ref.to_string account.id) 4)
-    in
-    let%map account =
-      Us_account.create ~routing:fake_routing ~account_number:(sprintf "%010d" number) ()
-    in
-    Account.Address.Us_account account
-  | `Lightning -> Ok (Account.Address.Lightning_node { node_id = "02" ^ hex seed })
+  let seed = digest ("fake-address:" ^ a.key) in
+  match%bind network_of_currency a.account.currency with
+  | `Fiat -> Fake_details.for_currency a.account.currency ~key:a.key
+  | `Lightning -> Ok [ Account.Address.Lightning_node { node_id = "02" ^ hex seed } ]
   | `Chain network ->
     let raw =
       match network with
@@ -511,7 +487,7 @@ let address_for t (account : Account.t) =
     in
     let%map address = Crypto_address.create network raw in
     ignore t;
-    Account.Address.Crypto { address; memo = None }
+    [ Account.Address.Crypto { address; memo = None } ]
 ;;
 
 let enrich t (a : account_state) =
@@ -519,61 +495,104 @@ let enrich t (a : account_state) =
   if not (List.is_empty a.account.addresses)
   then Ok a.account
   else (
-    let%map address = address_for t a.account in
-    a.account <- { a.account with addresses = [ address ] };
+    let%map addresses = addresses_for t a in
+    a.account <- { a.account with addresses };
     ignore (emit t (Account_updated a.account) : Event.t);
     a.account)
 ;;
 
+(* What [open_account] sends as the provider's idempotency key: our customer id (the
+   caller's, which survives restarts) and the currency. *)
+let default_open_key (c : customer_state) currency =
+  sprintf
+    "%s/%s"
+    (Kyc_core.Customer_id.to_string c.customer.customer_id)
+    (Money.Currency.to_string currency)
+;;
+
+let open_keyed t id currency ~key ~same_currency_reuses =
+  let open Or_error.Let_syntax in
+  let%bind c = customer_state t id in
+  let%bind () =
+    match c.kyc.status with
+    | Approved -> Ok ()
+    | status ->
+      Or_error.error_s [%message "KYC not approved" (status : Kyc_core.Status.t)]
+  in
+  let%bind (_ : [ `Chain of Network.t | `Lightning | `Fiat ]) =
+    network_of_currency currency
+  in
+  let key = Option.value key ~default:(default_open_key c currency) in
+  let by_key =
+    Hashtbl.find t.accounts_by_key key |> Option.bind ~f:(Hashtbl.find t.accounts)
+  in
+  let existing =
+    match by_key with
+    | Some _ -> by_key
+    | None when same_currency_reuses ->
+      Hashtbl.data t.accounts
+      |> List.find ~f:(fun a ->
+        Customer_ref.equal a.account.customer id
+        && Money.Currency.equal a.account.currency currency)
+    | None -> None
+  in
+  match existing with
+  | Some a ->
+    if Customer_ref.equal a.account.customer id
+       && Money.Currency.equal a.account.currency currency
+    then Ok a.account
+    else
+      Or_error.error_s
+        [%message
+          "idempotency key already opened another customer's or currency's account" key]
+  | None ->
+    let%bind () =
+      if List.mem supported_currencies currency ~equal:Money.Currency.equal
+      then Ok ()
+      else
+        open_system_accounts
+          ~chart:t.chart
+          ~card_chart:t.card_chart
+          t.journal
+          ~currencies:[ currency ]
+    in
+    let account_id = Account_ref.of_string (next_id t "acc") in
+    let ledger =
+      Ledger.Account_id.of_string ("fake:" ^ Account_ref.to_string account_id)
+    in
+    let%bind () =
+      Ledger.Journal.open_account
+        t.journal
+        (Ledger.Account.create
+           ~purpose:Customer_funds
+           ~tags:[ "customer", Customer_ref.to_string id ]
+           ledger
+           Liability)
+      |> ok_unit
+    in
+    let account : Account.t =
+      { id = account_id
+      ; customer = id
+      ; currency
+      ; status = Open
+      ; addresses = []
+      ; opened_at = now t
+      }
+    in
+    let a = { account; ledger; key } in
+    Hashtbl.set t.accounts ~key:account_id ~data:a;
+    Hashtbl.set t.accounts_by_key ~key ~data:account_id;
+    ignore (emit t (Account_opened account) : Event.t);
+    if t.config.auto_enrich then enrich t a else Ok account
+;;
+
 let open_account t id currency =
+  return (open_keyed t id currency ~key:None ~same_currency_reuses:true)
+;;
+
+let open_account_with_key t id currency ~idempotency_key =
   return
-    (let open Or_error.Let_syntax in
-     let%bind c = customer_state t id in
-     let%bind () =
-       match c.kyc.status with
-       | Approved -> Ok ()
-       | status ->
-         Or_error.error_s [%message "KYC not approved" (status : Kyc_core.Status.t)]
-     in
-     let%bind (_ : [ `Chain of Network.t | `Lightning | `Fiat | `Uk | `Us ]) =
-       network_of_currency currency
-     in
-     let existing =
-       Hashtbl.data t.accounts
-       |> List.find ~f:(fun a ->
-         Customer_ref.equal a.account.customer id
-         && Money.Currency.equal a.account.currency currency)
-     in
-     match existing with
-     | Some a -> Ok a.account
-     | None ->
-       let account_id = Account_ref.of_string (next_id t "acc") in
-       let ledger =
-         Ledger.Account_id.of_string ("fake:" ^ Account_ref.to_string account_id)
-       in
-       let%bind () =
-         Ledger.Journal.open_account
-           t.journal
-           (Ledger.Account.create
-              ~purpose:Customer_funds
-              ~tags:[ "customer", Customer_ref.to_string id ]
-              ledger
-              Liability)
-         |> ok_unit
-       in
-       let account : Account.t =
-         { id = account_id
-         ; customer = id
-         ; currency
-         ; status = Open
-         ; addresses = []
-         ; opened_at = now t
-         }
-       in
-       let a = { account; ledger } in
-       Hashtbl.set t.accounts ~key:account_id ~data:a;
-       ignore (emit t (Account_opened account) : Event.t);
-       if t.config.auto_enrich then enrich t a else Ok account)
+    (open_keyed t id currency ~key:(Some idempotency_key) ~same_currency_reuses:false)
 ;;
 
 let accounts t id =
