@@ -205,6 +205,35 @@ module type S = sig
   val ingest_webhook : t -> Webhook.Request.t -> Event.t list Or_error.t Deferred.t
 end
 
+(** An optional capability next to {!S}: a payee check that also returns what the
+    receiving bank said about the account besides the name (its currency). Providers that
+    offer it implement this signature too; {!Payee_details_of_verify} adapts any {!S} that
+    does not, with no currency. *)
+module type Payee_details = sig
+  type t
+
+  (** {!S.verify_payee}, with the receiving account's currency when the provider knows it.
+      The [result] is the one {!S.verify_payee} would give. *)
+  val verify_payee_details
+    :  t
+    -> customer:Customer_ref.t
+    -> Beneficiary.t
+    -> Payee_check_result.t Or_error.t Deferred.t
+end
+
+module Payee_details_of_verify (P : S) : Payee_details with type t = P.t = struct
+  type t = P.t
+
+  let verify_payee_details t ~customer beneficiary =
+    Deferred.Or_error.map (P.verify_payee t ~customer beneficiary) ~f:(fun result ->
+      Payee_check_result.create result)
+  ;;
+end
+
 module type Provider = sig
   module type S = S
+  module type Payee_details = Payee_details
+
+  (** {!Payee_details} over {!S.verify_payee}, never knowing the currency. *)
+  module Payee_details_of_verify (P : S) : Payee_details with type t = P.t
 end
