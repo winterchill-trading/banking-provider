@@ -132,6 +132,8 @@ type t =
   ; auths : auth Ids.Auth_id.Table.t
   ; orders : order_state Standing_order_ref.Table.t
   ; payee_checks : Beneficiary.Payee_check.t Beneficiary.Id.Table.t
+  ; payee_currencies : Money.Currency.t option Beneficiary.Id.Table.t
+  (** fixed by {!simulate_payee_account_currency}; [None] means "unknown" *)
   ; mutable kyc_simulation : Sandbox.Kyc_simulation.t
   ; kyc_overrides : Sandbox.Kyc_simulation.t Customer_ref.Table.t
   ; kyc_rounds : int Customer_ref.Table.t
@@ -204,6 +206,7 @@ let create ?(config = Config.default) ?(counters = []) ~time_source ~journal () 
   ; auths = Ids.Auth_id.Table.create ()
   ; orders = Standing_order_ref.Table.create ()
   ; payee_checks = Beneficiary.Id.Table.create ()
+  ; payee_currencies = Beneficiary.Id.Table.create ()
   ; kyc_simulation = Manual
   ; kyc_overrides = Customer_ref.Table.create ()
   ; kyc_rounds = Customer_ref.Table.create ()
@@ -1966,6 +1969,53 @@ let verify_payee t ~customer (beneficiary : Beneficiary.t) =
         | Bank_account { iban; _ } -> by_suffix (Iban.to_string iban)
         (* No US scheme checks payee names, and the fake knows no local scheme that does. *)
         | Crypto _ | Lightning _ | Internal _ | Us_account _ | Local _ -> Not_possible))
+;;
+
+let simulate_payee_account_currency t beneficiary currency =
+  Hashtbl.set t.payee_currencies ~key:beneficiary ~data:currency
+;;
+
+(* An account held here whose details the destination names. Details exist only once the
+   account has been read with its details ([enrich]), as a real provider's would. *)
+let held_account_currency t (destination : Beneficiary.Destination.t) =
+  Hashtbl.data t.accounts
+  |> List.find_map ~f:(fun (a : account_state) ->
+    let names =
+      match destination with
+      | Bank_account { iban; _ } ->
+        Option.exists (Account.iban a.account) ~f:(Iban.equal iban)
+      | Uk_account u ->
+        Option.exists (Account.uk_account a.account) ~f:(Uk_account.equal u)
+      | Us_account u ->
+        Option.exists (Account.us_account a.account) ~f:(Us_account.equal u)
+      | Local { scheme; fields } ->
+        Option.exists
+          (Account.local a.account ~scheme)
+          ~f:([%equal: (string * string) list] fields)
+      | Crypto { address; _ } ->
+        Option.exists (Account.crypto_address a.account) ~f:(Crypto_address.equal address)
+      | Lightning _ | Internal _ -> false
+    in
+    Option.some_if names a.account.currency)
+;;
+
+let verify_payee_details t ~customer (beneficiary : Beneficiary.t) =
+  let%map.Deferred.Or_error result = verify_payee t ~customer beneficiary in
+  let account_currency =
+    match Hashtbl.find t.payee_currencies beneficiary.id with
+    | Some fixed -> fixed
+    | None ->
+      (match held_account_currency t beneficiary.destination with
+       | Some c -> Some c
+       | None ->
+         (* Domestic UK and US accounts hold their scheme's currency; an IBAN or a local
+            format can hold any, so the fake does not guess. *)
+         (match beneficiary.destination with
+          | Uk_account _ -> Some Money.Currency.gbp
+          | Us_account _ -> Some Money.Currency.usd
+          | Bank_account _ | Crypto _ | Lightning _ | Internal _ | Local _ -> None))
+  in
+  Payee_check_result.create ?account_currency result
 ;;
 
 let ping t = return (Ok (ignore (emit t Ping : Event.t)))

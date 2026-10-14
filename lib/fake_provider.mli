@@ -46,7 +46,9 @@
     the beneficiary. Otherwise it goes by the last two characters of the account number or
     IBAN: [96] is [Unavailable], [97] [Close_match] (the name with initials), [98]
     [No_match], [99] [Account_not_found], anything else [Match]. Crypto, Lightning,
-    internal and US destinations (no US scheme checks names) are [Not_possible]. *)
+    internal and US destinations (no US scheme checks names) are [Not_possible].
+    {!verify_payee_details} adds the receiving account's currency when the fake can tell
+    it. *)
 
 open! Core
 open Async_kernel
@@ -100,6 +102,12 @@ val counters : t -> (string * int) list
 
 include Provider.S with type t := t
 include Sandbox.S with type t := t
+
+(** {!verify_payee} plus the receiving account's currency: what
+    {!simulate_payee_account_currency} fixed; else the currency of an account held here
+    whose details the destination names; else GBP for a UK sort code and account number
+    and USD for a US routing and account number; else unknown. *)
+include Provider.Payee_details with type t := t
 
 (** {2 Fake-only controls} *)
 
@@ -167,6 +175,14 @@ val simulate_payee_check
   -> Beneficiary.Id.t
   -> Beneficiary.Payee_check.t
   -> unit Or_error.t Deferred.t
+
+(** Fixes the receiving account currency {!verify_payee_details} reports for [beneficiary]
+    ([None]: unknown), overriding what the fake would work out. *)
+val simulate_payee_account_currency
+  :  t
+  -> Beneficiary.Id.t
+  -> Money.Currency.t option
+  -> unit
 
 (** The KYC simulation in force for [customer] (its override, else the default set by
     {!set_kyc_simulation}); without [customer], the default. Starts as [Manual]. *)
