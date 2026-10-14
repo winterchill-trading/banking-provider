@@ -12,6 +12,9 @@ module Config = struct
     ; payment : Money.Amount.t
     ; timeout : Time_ns.Span.t
     ; poll_interval : Time_ns.Span.t
+    ; currency : Money.Currency.t
+    ; rail : Rail.t
+    ; payee : string option
     }
 
   let eur s = Money.Amount.of_decimal_string Money.Currency.eur s |> Or_error.ok_exn
@@ -36,6 +39,26 @@ module Config = struct
     }
   ;;
 
+  let gbp s = Money.Amount.of_decimal_string Money.Currency.gbp s |> Or_error.ok_exn
+
+  let synthetic_uk_person =
+    let open Kyc_core in
+    { synthetic_person with
+      nationality = Pii.create (Country.of_string "GB")
+    ; residential_address =
+        Pii.create
+          { Address.line1 = "1 Test Street"
+          ; line2 = None
+          ; city = "London"
+          ; region = None
+          ; postal_code = Some "EC1A 1BB"
+          ; country = Country.of_string "GB"
+          }
+    ; (* From the range the UK regulator keeps for drama and testing. *)
+      mobile = Pii.create "+447700900000"
+    }
+  ;;
+
   let default ~run_id =
     { run_id
     ; person = synthetic_person
@@ -46,8 +69,25 @@ module Config = struct
     ; payment = eur "30.00"
     ; timeout = Time_ns.Span.of_sec 10.
     ; poll_interval = Time_ns.Span.of_ms 50.
+    ; currency = Money.Currency.eur
+    ; rail = Sepa_instant
+    ; payee = None
     }
   ;;
+
+  let gbp ~run_id =
+    { (default ~run_id) with
+      person = synthetic_uk_person
+    ; deposit = gbp "100.00"
+    ; payment = gbp "30.00"
+    ; currency = Money.Currency.gbp
+    ; rail = Faster_payments
+    ; (* A sort code no bank uses, so a sandbox cannot reach a real account. *)
+      payee = Some "99-00-00 87654321"
+    }
+  ;;
+
+  let payee t = Option.value t.payee ~default:t.payee_iban
 end
 
 module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
@@ -115,11 +155,44 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
     customer
   ;;
 
-  let eur_account config t customer =
-    let%bind account = P.open_account t customer Money.Currency.eur in
-    poll config ~what:"an IBAN on the account" (fun () ->
-      let%map account = P.enrich_account t account.id in
-      Option.map (Account.iban account) ~f:(fun _ -> account))
+  let is_sepa (config : Config.t) = Option.is_some (Sepa.Scheme.of_rail config.rail)
+
+  (* What the account needs before money can arrive on the configured rail. *)
+  let address_wanted (config : Config.t) =
+    if is_sepa config
+    then "an IBAN"
+    else if Rail.is_uk config.rail
+    then "a sort code and account number"
+    else "an address"
+  ;;
+
+  let has_address (config : Config.t) account =
+    if is_sepa config
+    then Option.is_some (Account.iban account)
+    else if Rail.is_uk config.rail
+    then Option.is_some (Account.uk_account account)
+    else not (List.is_empty account.Account.addresses)
+  ;;
+
+  let rail_account (config : Config.t) t customer =
+    let%bind account = P.open_account t customer config.currency in
+    poll
+      config
+      ~what:(address_wanted config ^ " on the account")
+      (fun () ->
+        let%map account = P.enrich_account t account.id in
+        Option.some_if (has_address config account) account)
+  ;;
+
+  (* The EUR scenario keeps its original name, so earlier reports still line up. *)
+  let account_scenario_name (config : Config.t) =
+    if is_sepa config && Money.Currency.equal config.currency Money.Currency.eur
+    then "an approved customer gets an EUR account with an IBAN"
+    else
+      sprintf
+        "an approved customer gets a %s account with %s"
+        (Money.Currency.code config.currency)
+        (address_wanted config)
   ;;
 
   let available config t account ~what ~f =
@@ -132,9 +205,9 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
 
   let funded config t suffix =
     let%bind customer = approved_customer config t suffix in
-    let%bind account = eur_account config t customer.id in
+    let%bind account = rail_account config t customer.id in
     let%bind (_ : Transfer.Id.t) =
-      Sandbox.simulate_deposit t ~account:account.id ~rail:Sepa_instant config.deposit
+      Sandbox.simulate_deposit t ~account:account.id ~rail:config.rail config.deposit
     in
     let%map (_ : Money.Amount.t) =
       available config t account.id ~what:"the deposit" ~f:(equal_amount config.deposit)
@@ -142,29 +215,46 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
     customer, account
   ;;
 
+  let payee_beneficiary (config : Config.t) ~owner ~id =
+    Beneficiary.create
+      ~id:(Beneficiary.Id.of_string ("ben-" ^ id))
+      ~owner:(Customer_ref.to_string owner)
+      ~name:"Payee"
+      ~rail:config.rail
+      ~now:(Time_ns.now ())
+      (Config.payee config)
+  ;;
+
+  let uk_draft (config : Config.t) (account : Account.t) ~id amount =
+    Deferred.return
+      (let open Or_error.Let_syntax in
+       let%bind beneficiary = payee_beneficiary config ~owner:account.customer ~id in
+       Transfer.draft
+         ~id:(Transfer.Id.of_string id)
+         ~rail:config.rail
+         ~account:(Ledger.Account_id.of_string "conformance:app")
+         ~beneficiary
+         ~amount
+         ~reference:"conformance"
+         ~now:(Time_ns.now ())
+         ())
+  ;;
+
   let sepa_draft (config : Config.t) (account : Account.t) ~id amount =
     Deferred.return
       (let open Or_error.Let_syntax in
-       let%bind beneficiary =
-         Beneficiary.create
-           ~id:(Beneficiary.Id.of_string ("ben-" ^ id))
-           ~owner:(Customer_ref.to_string account.customer)
-           ~name:"Payee"
-           ~rail:Sepa_instant
-           ~now:(Time_ns.now ())
-           config.payee_iban
-       in
+       let%bind beneficiary = payee_beneficiary config ~owner:account.customer ~id in
        let%bind debtor_iban =
          Account.iban account |> Or_error.of_option ~error:(Error.of_string "no IBAN")
        in
-       let%bind creditor_iban = Iban.of_string config.payee_iban in
+       let%bind creditor_iban = Iban.of_string (Config.payee config) in
        let party name iban = { Iso20022.Party.name; iban; bic = None; address = None } in
        let%bind payment_id =
          Iso20022.Payment_id.create ~end_to_end_id:(String.prefix id 35) ()
        in
        Transfer.draft
          ~id:(Transfer.Id.of_string id)
-         ~rail:Sepa_instant
+         ~rail:config.rail
          ~account:(Ledger.Account_id.of_string "conformance:app")
          ~beneficiary
          ~amount
@@ -177,6 +267,13 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
                  ()))
          ~now:(Time_ns.now ())
          ())
+  ;;
+
+  (* A draft on the configured rail: SEPA details for SEPA rails, none for the others. *)
+  let draft config account ~id amount =
+    if is_sepa config
+    then sepa_draft config account ~id amount
+    else uk_draft config account ~id amount
   ;;
 
   (* Answers a challenge if there is one. *)
@@ -225,11 +322,11 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
             in
             Pipe.close_read events)
       }
-    ; { name = "an approved customer gets an EUR account with an IBAN"
+    ; { name = account_scenario_name config
       ; run =
           (fun t ->
             let%bind customer = approved_customer config t "account" in
-            let%bind account = eur_account config t customer.id in
+            let%bind account = rail_account config t customer.id in
             let%bind accounts = P.accounts t customer.id in
             check_d
               (List.exists accounts ~f:(fun a -> Account_ref.equal a.id account.id))
@@ -239,13 +336,13 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
       ; run =
           (fun t ->
             let%bind customer = approved_customer config t "deposit" in
-            let%bind account = eur_account config t customer.id in
+            let%bind account = rail_account config t customer.id in
             let events = P.events t in
             let%bind id =
               Sandbox.simulate_deposit
                 t
                 ~account:account.id
-                ~rail:Sepa_instant
+                ~rail:config.rail
                 config.deposit
             in
             let%bind () =
@@ -272,10 +369,10 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
           (fun t ->
             let%bind _customer, account = funded config t "pay" in
             let%bind quote =
-              P.quote_fee t ~from:account.id ~rail:Sepa_instant config.payment
+              P.quote_fee t ~from:account.id ~rail:config.rail config.payment
             in
             let%bind draft =
-              sepa_draft config account ~id:(config.run_id ^ "-pay-1") config.payment
+              draft config account ~id:(config.run_id ^ "-pay-1") config.payment
             in
             let%bind started = P.initiate_transfer t ~from:account.id draft in
             let%bind (_ : [ `Done of Transfer_info.t | `Confirmed ]) =
@@ -301,7 +398,7 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
           (fun t ->
             let%bind _customer, account = funded config t "resend" in
             let%bind draft =
-              sepa_draft config account ~id:(config.run_id ^ "-resend-1") config.payment
+              draft config account ~id:(config.run_id ^ "-resend-1") config.payment
             in
             let%bind first = P.initiate_transfer t ~from:account.id draft in
             let%bind (_ : [ `Done of Transfer_info.t | `Confirmed ]) =
@@ -316,7 +413,7 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
                 Deferred.Or_error.error_string "a resent, finished transfer asked for SCA"
             in
             let%bind quote =
-              P.quote_fee t ~from:account.id ~rail:Sepa_instant config.payment
+              P.quote_fee t ~from:account.id ~rail:config.rail config.payment
             in
             let%bind expected =
               Deferred.return (Money.Amount.sub config.deposit quote.total)
@@ -333,7 +430,7 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
             let%bind _customer, account = funded config t "overdraw" in
             let too_much = Money.Amount.scale config.deposit 2 in
             let%bind draft =
-              sepa_draft config account ~id:(config.run_id ^ "-over-1") too_much
+              draft config account ~id:(config.run_id ^ "-over-1") too_much
             in
             (* Refusing at once and failing afterwards are both acceptable. *)
             let%bind () =
@@ -359,7 +456,7 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
           (fun t ->
             let%bind _customer, account = funded config t "wrong-code" in
             let%bind draft =
-              sepa_draft config account ~id:(config.run_id ^ "-wrong-1") config.payment
+              draft config account ~id:(config.run_id ^ "-wrong-1") config.payment
             in
             match%bind P.initiate_transfer t ~from:account.id draft with
             | Done _ -> return () (* this provider did not ask for SCA here *)
@@ -420,13 +517,17 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
                 (Card_core.Ids.Card_id.equal card.id again.id)
                 "a resent card request issued a second card"
             in
-            let one = Money.Amount.of_minor_units_int Money.Currency.eur 100 in
+            let one = Money.Amount.of_minor_units_int config.currency 100 in
             let%bind merchant =
               Deferred.return
                 (Card_core.Merchant.create
                    ~name:"Conformance Shop"
                    ~mcc:(Card_core.Mcc.of_int_exn 5411)
-                   ~country:(Card_core.Country.of_string "DE")
+                   ~country:
+                     (Card_core.Country.of_string
+                        (if Money.Currency.equal config.currency Money.Currency.gbp
+                         then "GB"
+                         else "DE"))
                    ~amount:one)
             in
             let%bind approved = Sandbox.simulate_card_auth t card.id merchant in
@@ -442,6 +543,32 @@ module Make (P : Provider.S) (Sandbox : Sandbox.S with type t = P.t) = struct
               (Card_core.Response_code.equal frozen Not_permitted)
               !"frozen card answered %{Card_core.Response_code}"
               frozen)
+      }
+    ; { name = "verify_payee answers, and a simulated answer is returned"
+      ; run =
+          (fun t ->
+            let%bind customer = approved_customer config t "payee" in
+            let%bind beneficiary =
+              Deferred.return
+                (payee_beneficiary
+                   config
+                   ~owner:customer.id
+                   ~id:(config.run_id ^ "-payee-1"))
+            in
+            let%bind (_ : Beneficiary.Payee_check.t) =
+              P.verify_payee t ~customer:customer.id beneficiary
+            in
+            let expected =
+              Beneficiary.Payee_check.Close_match { suggested_name = "P Ayee" }
+            in
+            let%bind () = Sandbox.simulate_payee_check t beneficiary.id expected in
+            let%bind result = P.verify_payee t ~customer:customer.id beneficiary in
+            check_d
+              (Beneficiary.Payee_check.equal result expected)
+              !"simulated %{sexp: Beneficiary.Payee_check.t}, got %{sexp: \
+                Beneficiary.Payee_check.t}"
+              expected
+              result)
       }
     ]
   ;;
